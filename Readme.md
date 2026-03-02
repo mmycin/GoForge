@@ -35,8 +35,10 @@ The CLI operates relative to the active working directory, assuming it is inside
 
 ### Core Utilities
 
+- `goforge new` - Create a new GoForge project from the template.
 - `goforge gen:key` - Generates a secure, cryptographically random `APP_KEY` and sets it in your `.env` file.
 - `goforge rem:key` - Removes the active `APP_KEY` from your `.env` file.
+- `goforge readme` - Displays the recommended GoForge workflow.
 - `goforge version` - Displays the framework CLI version and credits.
 
 ### Service Generation
@@ -55,7 +57,7 @@ GoForge helps you bridge the gap between global scaffolding tools and project-sp
 
 - `goforge gen:command [name]` - Creates a standard Cobra CLI command boilerplate within your project's `internal/console` directory (e.g., `make:admin`).
 - `goforge rem:command [name]` - Removes a generated Cobra command from your project.
-- `goforge app run [command] [...args]` - This command proxies the local Go compiler! Executing `goforge app run cache:clear` will seamlessly invoke `go run cmd/main.go cache:clear` from within the active project directory, ensuring your custom commands load your full backend environment dependencies automatically.
+- `goforge app serve [command] [...args]` - This command proxies the local Go compiler! Executing `goforge app serve` (or `goforge app serve serve`) will seamlessly invoke `go run cmd/main.go serve` from within the active project directory, ensuring your custom commands load your full backend environment dependencies automatically.
 
 ### Database Operations
 
