@@ -15,7 +15,7 @@ type Config struct {
 	DBHost       string
 	DBPort       string
 	DBDevName    string
-tDBMigrator   string
+	DBMigrator   string
 }
 
 // Load reads the local go.mod and .env files to construct a configuration object
@@ -67,7 +67,7 @@ func Load() (*Config, error) {
 					cfg.DBPort = val
 				case "DB_DEV_NAME":
 					cfg.DBDevName = val
-t			case "DB_MIGRATOR":
+				case "DB_MIGRATOR":
 					cfg.DBMigrator = val
 				}
 			}
@@ -78,5 +78,3 @@ t			case "DB_MIGRATOR":
 
 	return cfg, nil
 }
-
-

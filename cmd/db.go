@@ -332,6 +332,11 @@ func removeSqlc(targetPath string) {
 }
 
 func remMigration() {
+	cfg, err := env.Load()
+	if err != nil {
+		Warning("Could not load environment: %v", err)
+	}
+
 	migrationDir := "internal/database/migrations"
 	files, err := filepath.Glob(filepath.Join(migrationDir, "*.sql"))
 	if err != nil || len(files) == 0 {
@@ -348,10 +353,6 @@ func remMigration() {
 
 	Info("Updating atlas migrate hash...")
 
-	cfg, err := env.Load()
-	if err != nil {
-		Warning("Could not parse env for atlas hash update: %v", err)
-	}
 	dbConn := "sqlite"
 	if cfg != nil && cfg.DBConnection != "" {
 		dbConn = cfg.DBConnection
@@ -369,7 +370,11 @@ func remMigration() {
 }
 
 func genMigration(name string) {
-	cfg, _ := env.Load()
+	cfg, err := env.Load()
+	if err != nil {
+		Warning("Could not load environment: %v", err)
+	}
+
 	dbConn := "sqlite"
 	dbName := ""
 	dbUser := ""
@@ -403,6 +408,7 @@ func genMigration(name string) {
 	}
 
 	atlasEnv := os.Environ()
+
 	atlasEnv = append(atlasEnv, "DB_CONNECTION="+dbConn)
 	atlasEnv = append(atlasEnv, "DB_NAME="+dbName)
 	atlasEnv = append(atlasEnv, "DB_USERNAME="+dbUser)
@@ -522,13 +528,18 @@ func main() {
 }
 
 func migrateDB() {
-	// The universal CLI can't easily auto-migrate local database via direct GORM
-	// without executing code. Therefore we'll proxy it to "go run cmd/main.go migrate" if possible,
-	// or we just run atlas apply.
+	cfg, err := env.Load()
+	if err != nil {
+		Warning("Could not load environment: %v", err)
+	}
+
+	if cfg != nil && cfg.DBMigrator == "gorm" {
+		runGormMigrate()
+		return
+	}
 
 	Info("Running Atlas migrate apply...")
 
-	cfg, err := env.Load()
 	dbConn := "sqlite"
 	dbName := ""
 	dbUser := ""
@@ -537,7 +548,7 @@ func migrateDB() {
 	dbPort := "3306"
 	dbDevName := ""
 
-	if err == nil && cfg != nil {
+	if cfg != nil {
 		if cfg.DBConnection != "" {
 			dbConn = cfg.DBConnection
 		}
@@ -562,6 +573,7 @@ func migrateDB() {
 	}
 
 	atlasEnv := os.Environ()
+
 	atlasEnv = append(atlasEnv, "DB_CONNECTION="+dbConn)
 	atlasEnv = append(atlasEnv, "DB_NAME="+dbName)
 	atlasEnv = append(atlasEnv, "DB_USERNAME="+dbUser)
@@ -580,4 +592,56 @@ func migrateDB() {
 	}
 	Success("Atlas migration completed successfully")
 }
+func runGormMigrate() {
+	cfg, _ := env.Load()
+	moduleName := "github.com/mmycin/goforge"
+	if cfg != nil && cfg.Module != "" {
+		moduleName = cfg.Module
+	}
 
+	Info("Preparing temporary GORM migrator...")
+
+	migratorSource := fmt.Sprintf(`//go:build ignore
+package main
+
+import (
+	"fmt"
+	"os"
+
+	"%s/internal/database"
+	"%s/internal/services"
+)
+
+func main() {
+	fmt.Println("→ Connecting to database...")
+	if err := database.Connect(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: Database connection failed: %%v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Println("→ Starting GORM AutoMigrate...")
+	models := services.Model()
+	if err := database.DB.Gorm.AutoMigrate(models...); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: AutoMigrate failed: %%v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println("✓ Database migration completed successfully")
+}
+`, moduleName, moduleName)
+
+	tmpFile := ".goforge-tmp-migrate.go"
+	if err := os.WriteFile(tmpFile, []byte(migratorSource), 0644); err != nil {
+		ErrorLog("Failed to create temporary migrator file: %v", err)
+		os.Exit(1)
+	}
+	defer os.Remove(tmpFile)
+
+	cmd := exec.Command("go", "run", tmpFile)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		ErrorLog("GORM migration failed: %v", err)
+		os.Exit(1)
+	}
+	Success("GORM migration completed successfully")
+}
