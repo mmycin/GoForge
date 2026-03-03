@@ -580,3 +580,4 @@ func migrateDB() {
 	}
 	Success("Atlas migration completed successfully")
 }
+
