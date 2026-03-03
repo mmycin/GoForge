@@ -1,4 +1,4 @@
-# GoForge CLI
+![GoForge Logo](assets/logo_without_bg.png)
 
 > A comprehensive, production-ready Go application framework and CLI for rapid database, gRPC, and service scaffolding.
 
@@ -73,3 +73,6 @@ GoForge natively supports `gorm`, `atlas`, and `sqlc` code generations using the
 ## License
 
 The `goforge` CLI is licensed under the Apache License 2.0. See the [LICENSE](LICENSE) file for more details.
+
+
+

@@ -50,7 +50,9 @@ func createNewProject(projectName, moduleName string) {
 
 	// 1. Clone the template
 	// Info("Cloning template from github.com/mmycin/goforge-template...")
-	cloneCmd := exec.Command("git", "clone", "--branch", "main", "https://github.com/mmycin/goforge-template", projectName)
+	cloneCmd := exec.Command("git", "clone", "--branch", "main", "--quiet", "https://github.com/mmycin/goforge-template", projectName)
+	cloneCmd.Stdout = nil
+	cloneCmd.Stderr = nil
 	if err := cloneCmd.Run(); err != nil {
 		ErrorLog("Failed to clone template: %v", err)
 		return
@@ -112,3 +114,4 @@ func createNewProject(projectName, moduleName string) {
 	Info("  cd %s", projectName)
 	Info("  GoForge app serve")
 }
+
