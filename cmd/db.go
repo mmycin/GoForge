@@ -488,8 +488,9 @@ func runLoader() {
 		}
 	}
 
-	loaderSource := fmt.Sprintf(`//go:build ignore
-package main
+	Info("Preparing temporary GORM schema loader...")
+
+	loaderSource := fmt.Sprintf(`package main
 
 import (
 	"fmt"
@@ -511,7 +512,7 @@ func main() {
 }
 `, moduleName, dbConn)
 
-	tmpFile := ".goforge-tmp-loader.go"
+	tmpFile := "goforge_tmp_loader.go"
 	if err := os.WriteFile(tmpFile, []byte(loaderSource), 0644); err != nil {
 		ErrorLog("Failed to create temporary loader file: %v", err)
 		os.Exit(1)
@@ -533,7 +534,23 @@ func migrateDB() {
 		Warning("Could not load environment: %v", err)
 	}
 
-	if cfg != nil && cfg.DBMigrator == "gorm" {
+	migrator := "atlas"
+	if cfg != nil && cfg.DBMigrator != "" {
+		migrator = cfg.DBMigrator
+	}
+	Info("Detected migrator: %s", migrator)
+
+	if migrator == "gorm" {
+		// First try to run the local migrate command if it exists in the template
+		cmd := exec.Command("go", "run", "cmd/main.go", "migrate")
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err == nil {
+			Success("GORM migration completed via app command")
+			return
+		}
+
+		// Fallback to temporary runner if local command fails
 		runGormMigrate()
 		return
 	}
@@ -601,8 +618,7 @@ func runGormMigrate() {
 
 	Info("Preparing temporary GORM migrator...")
 
-	migratorSource := fmt.Sprintf(`//go:build ignore
-package main
+	migratorSource := fmt.Sprintf(`package main
 
 import (
 	"fmt"
@@ -629,7 +645,7 @@ func main() {
 }
 `, moduleName, moduleName)
 
-	tmpFile := ".goforge-tmp-migrate.go"
+	tmpFile := "goforge_tmp_migrate.go"
 	if err := os.WriteFile(tmpFile, []byte(migratorSource), 0644); err != nil {
 		ErrorLog("Failed to create temporary migrator file: %v", err)
 		os.Exit(1)

@@ -50,6 +50,10 @@ func Load() (*Config, error) {
 			parts := strings.SplitN(line, "=", 2)
 			if len(parts) == 2 {
 				key, val := strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
+				// Strip inline comments if present
+				if idx := strings.Index(val, "#"); idx != -1 {
+					val = strings.TrimSpace(val[:idx])
+				}
 				// Strip surrounding quotes if present
 				val = strings.Trim(val, `"'`)
 				switch key {
