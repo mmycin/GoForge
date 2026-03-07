@@ -1,78 +1,116 @@
 ![GoForge Logo](assets/logo_without_bg.png)
 
+> [!NOTE]
 > A comprehensive, production-ready Go application framework and CLI for rapid database, gRPC, and service scaffolding.
 
-The `GoForge` CLI is a powerful command-line tool designed to accompany the GoForge application framework template. It provides a universal utility for rapidly scaffolding new services, generating database migrations, compiling protocol buffers, and managing application-specific console commands effortlessly out-of-the-box.
+The **GoForge CLI** is a powerful command-line tool designed to accompany the GoForge application framework template. It provides a universal utility for rapidly scaffolding new services, generating database migrations, compiling protocol buffers, and managing application-specific console commands effortlessly out-of-the-box.
 
-## Features
+## ✨ Features
 
-- **Zero-Configuration Awareness**: The CLI dynamically analyzes your project's `.env` and `go.mod` files for context; it executes tasks directly against your application state without complicated tooling setup.
-- **Service Scaffolding**: Automatically generate complete service skeletons, including database models, service contracts, gRPC stubs, API handlers, and routes.
-- **Database Tooling**: Effortlessly integrate with `atlasschema` and `sqlc` for clean database migrations and typed SQL query generation!
-- **Extensibility**: Bootstrap custom local CLI tools to provide application specific console actions (e.g. running daily cronjobs, admin backfills, cache clearers, etc).
+- **🚀 Zero-Configuration Awareness**: The CLI dynamically analyzes your project's `.env` and `go.mod` files for context; it executes tasks directly against your application state without complicated tooling setup.
+- **🏗️ Service Scaffolding**: Automatically generate complete service skeletons, including database models, service contracts, gRPC stubs, API handlers, and routes.
+- **🗄️ Database Tooling**: Effortlessly integrate with `atlas` and `sqlc` for clean database migrations and typed SQL query generation!
+- **🔌 Extensibility**: Bootstrap custom local CLI tools to provide application specific console actions (e.g. running daily cronjobs, admin backfills, cache clearers, etc).
 
-## Installation
+---
 
-You can install the `GoForge` CLI directly from source using `go install`:
+## 🏗️ Project Structure
+
+A typical GoForge project follows a clean, modular architecture:
+
+```text
+.
+├── cmd/                # Application entry points (main.go)
+├── internal/           # Private application code
+│   ├── cache/          # Caching drivers (Redis, Ristretto, Multi-tier)
+│   ├── client/         # internal gRPC and HTTP clients
+│   ├── config/         # Configuration loaders and types
+│   ├── console/        # Application-specific CLI commands
+│   ├── database/       # Database core, migrations, and SQLC queries
+│   ├── server/         # HTTP and gRPC server setups & middleware
+│   └── services/       # Domain-specific business logic & services
+├── proto/              # Protocol Buffer definitions
+├── tests/              # Unit, integration, and client tests
+├── air.toml            # Air configuration for live reloading
+├── atlas.hcl           # Atlas migration configuration
+├── goforge.sh          # Helper shell script for CLI proxying
+└── sqlc.yaml           # SQLC configuration
+```
+
+---
+
+## 🏁 Getting Started
+
+### Prerequisites
+
+Ensure you have the following installed:
+
+- [Go](https://go.dev/doc/install) (1.21+)
+- [Atlas](https://atlasgo.io/getting-started/) (for migrations)
+- [SQLC](https://sqlc.dev/) (for type-safe SQL)
+- [Protoc](https://grpc.io/docs/protoc-installation/) (for gRPC)
+
+### Installation
+
+Install the **GoForge CLI** globally:
 
 ```bash
 go install github.com/mmycin/GoForge@latest
 ```
 
-_(adjust the GitHub URL above to the correct module path if necessary)_
+Ensure your `$GOPATH/bin` is in your `$PATH`.
 
-Ensure that your `$GOPATH/bin` directory is available in your system's `$PATH` variable so you can run the `goforge` command globally!
-
-To verify installation, run:
+### Initializing a Project
 
 ```bash
-goforge version
+goforge new my-awesome-project
+cd my-awesome-project
 ```
 
-## Usage & Commands
+---
 
-The CLI operates relative to the active working directory, assuming it is inside a valid `goforge-template` structured project.
+## 🛠️ Usage & Commands
 
-### Core Utilities
+### 🔑 Core Utilities
 
-- `goforge new` - Create a new GoForge project from the template.
-- `goforge gen:key` - Generates a secure, cryptographically random `APP_KEY` and sets it in your `.env` file.
-- `goforge rem:key` - Removes the active `APP_KEY` from your `.env` file.
-- `goforge readme` - Displays the recommended GoForge workflow.
-- `goforge version` - Displays the framework CLI version and credits.
+| Command           | Description                                      |
+| :---------------- | :----------------------------------------------- |
+| `goforge new`     | Create a new GoForge project from the template.  |
+| `goforge gen:key` | Generates and sets a secure `APP_KEY` in `.env`. |
+| `goforge rem:key` | Removes the active `APP_KEY` from `.env`.        |
+| `goforge readme`  | Displays the recommended GoForge workflow.       |
+| `goforge version` | Displays the CLI version.                        |
 
-### Service Generation
+### 🛠️ Service Generation
 
-- `goforge gen:service [name]` - Scaffolds a complete boilerplate API and gRPC service in `internal/services/<name>`. Includes routing, docs, interfaces, and proto definitions!
-- `goforge rem:service [name]` - Permanently deletes the `<name>` service directory, its protobufs, and un-registers it from the application kernel.
+Scaffold domain logic rapidly:
 
-### Protocol Buffers
+- **`goforge gen:service [name]`**: Scaffolds a complete service in `internal/services/<name>`.
+- **`goforge rem:service [name]`**: Safely removes a service and un-registers it.
 
-- `goforge gen:proto [name]` - Compiles the specific `.proto` file utilizing `protoc` and generates the gRPC implementation structure. Omit the `name` argument to run compilation on all active services globally.
-- `goforge rem:proto` - Scrubs all generated `.pb.go` and `_grpc.pb.go` implementations safely.
+### 📡 Protocol Buffers
 
-### Custom Application Commands
+- **`goforge gen:proto [name]`**: Compiles specific or all `.proto` files using `protoc`.
+- **`goforge rem:proto`**: Scrubs all generated `.pb.go` files.
 
-GoForge helps you bridge the gap between global scaffolding tools and project-specific execution!
+### 💻 Custom Application Commands
 
-- `goforge gen:command [name]` - Creates a standard Cobra CLI command boilerplate within your project's `internal/console` directory (e.g., `make:admin`).
-- `goforge rem:command [name]` - Removes a generated Cobra command from your project.
-- `goforge app serve [command] [...args]` - This command proxies the local Go compiler! Executing `goforge app serve` (or `goforge app serve serve`) will seamlessly invoke `go run cmd/main.go serve` from within the active project directory, ensuring your custom commands load your full backend environment dependencies automatically.
+Bridge the gap between global tools and project-specific execution:
 
-### Database Operations
+- **`goforge gen:command [name]`**: Creates a Cobra CLI command in `internal/console`.
+- **`goforge app serve [args]`**: Proxies the local compiler. Running `goforge app serve` invokes `go run cmd/main.go serve`, loading the full environment.
 
-GoForge natively supports `gorm`, `atlas`, and `sqlc` code generations using these proxy commands:
+### 🗄️ Database Operations
 
-- `goforge migrate` - Applies the current SQL migrations against the active database using Atlas.
-- `goforge gen:migration [name]` - Parses the active GORM schema mappings via a dynamic `loader` and compares them to the active dev database to generate precise schema differences using Atlas!
-- `goforge rem:migration` - Reverts and deletes the most recent database migration iteration.
-- `goforge loader` - (Internal) Dynamically parses active models to output raw schema queries used during `gen:migration`.
-- `goforge gen:sqlc` - Parses your custom queries in `internal/database/queries/*.sql` into type-safe Go bindings via `sqlc` and injects them seamlessly into the active `internal/database/database.go` core.
-- `goforge rem:sqlc` - Removes `sqlc` hooks from the project core and deletes generated struct files.
+Native support for `gorm`, `atlas`, and `sqlc`:
 
-## License
+- **`goforge migrate`**: Applies SQL migrations using Atlas.
+- **`goforge gen:migration [name]`**: Generates schema differences using Atlas and GORM.
+- **`goforge rem:migration`**: Reverts the most recent migration.
+- **`goforge gen:sqlc`**: Compiles `internal/database/queries/*.sql` into type-safe Go.
+
+---
+
+## 📄 License
 
 The `goforge` CLI is licensed under the Apache License 2.0. See the [LICENSE](LICENSE) file for more details.
-
-
-
