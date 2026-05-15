@@ -2,6 +2,9 @@ package cmd
 
 import (
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"strings"
@@ -140,7 +143,7 @@ func (d *%sDocs) Register(engine *gin.Engine) {
 }
 `, name, moduleName, camelName, camelName, camelName, name, name, name),
 		"service.go": "package " + name + "\n",
-		"model.go":   fmt.Sprintf("package %s\n\nimport \"time\"\n\ntype %s struct {\n\tID        uint      `gorm:\"primaryKey;autoIncrement\" json:\"id\"`\n\tCreatedAt time.Time `gorm:\"autoCreateTime\" json:\"created_at\"`\n\tUpdatedAt time.Time `gorm:\"autoUpdateTime\" json:\"updated_at\"`\n}\n", name, camelName),
+		"model.go": fmt.Sprintf("package %s\n\nimport \"time\"\n\ntype %s struct {\n\tID        uint      `gorm:\"primaryKey;autoIncrement\" json:\"id\"`\n\tCreatedAt time.Time `gorm:\"autoCreateTime\" json:\"created_at\"`\n\tUpdatedAt time.Time `gorm:\"autoUpdateTime\" json:\"updated_at\"`\n}\n\nfunc (t *%s) To%sModel() *%s {\n\treturn &%s{\n\t\tID:        t.ID,\n\t\tCreatedAt: t.CreatedAt,\n\t\tUpdatedAt: t.UpdatedAt,\n\t}\n}\n", name, camelName, camelName, camelName, camelName, camelName),
 	}
 
 	for fname, content := range files {
@@ -222,12 +225,28 @@ func registerModels(moduleName string) error {
 		return err
 	}
 
-	var services []string
+	type ServiceInfo struct {
+		Name   string
+		Models []string
+	}
+
+	var services []ServiceInfo
 	for _, e := range entries {
 		if e.IsDir() {
 			modelPath := filepath.Join(servicesDir, e.Name(), "model.go")
 			if _, err := os.Stat(modelPath); err == nil {
-				services = append(services, e.Name())
+				models, err := findModelsInFile(modelPath)
+				if err != nil {
+					Warning("Could not parse models in %s: %v", modelPath, err)
+					// Fallback to title case of service name if parsing fails
+					models = []string{toCamelCase(e.Name())}
+				}
+				if len(models) > 0 {
+					services = append(services, ServiceInfo{
+						Name:   e.Name(),
+						Models: models,
+					})
+				}
 			}
 		}
 	}
@@ -237,7 +256,7 @@ func registerModels(moduleName string) error {
 import (
 	"{{ .Module }}/internal/server"
 {{- range .Services }}
-	"{{ $.Module }}/internal/services/{{ . }}"
+	"{{ $.Module }}/internal/services/{{ .Name }}"
 {{- end }}
 )
 
@@ -249,8 +268,10 @@ func GetRouters() []server.Router {
 // Model returns all models to be registered with GORM
 func Model() []any {
 	return []any{
-{{- range .Services }}
-		&{{ . }}.{{ title . }}{},
+{{- range $service := .Services }}
+	{{- range .Models }}
+		&{{ $service.Name }}.{{ . }}{},
+	{{- end }}
 {{- end }}
 	}
 }
@@ -282,11 +303,39 @@ func Model() []any {
 
 	data := struct {
 		Module   string
-		Services []string
+		Services []ServiceInfo
 	}{
 		Module:   moduleName,
 		Services: services,
 	}
 
 	return t.Execute(f, data)
+}
+
+func findModelsInFile(path string) ([]string, error) {
+	fset := token.NewFileSet()
+	node, err := parser.ParseFile(fset, path, nil, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	var models []string
+	for _, f := range node.Decls {
+		genDecl, ok := f.(*ast.GenDecl)
+		if !ok || genDecl.Tok != token.TYPE {
+			continue
+		}
+
+		for _, spec := range genDecl.Specs {
+			typeSpec, ok := spec.(*ast.TypeSpec)
+			if !ok {
+				continue
+			}
+			// Check if it's a struct and exported
+			if _, ok := typeSpec.Type.(*ast.StructType); ok && ast.IsExported(typeSpec.Name.Name) {
+				models = append(models, typeSpec.Name.Name)
+			}
+		}
+	}
+	return models, nil
 }
