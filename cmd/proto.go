@@ -69,7 +69,7 @@ func removeProto() error {
 				}
 			}
 			// Also look in gen/ if it exists
-			genDir := filepath.Join("proto", e.Name(), "gen")
+			genDir := filepath.Join("internal/proto", e.Name(), "gen")
 			if _, err := os.Stat(genDir); err == nil {
 				Info("  Removing %s", genDir)
 				if err := os.RemoveAll(genDir); err != nil {
@@ -84,7 +84,7 @@ func removeProto() error {
 }
 
 func generateProto(serviceName string) error {
-	protoDir := "proto"
+	protoDir := "internal/proto"
 	servicesDir := "internal/services"
 
 	// Find proto files
@@ -262,8 +262,8 @@ func (t *%s) ToModel() *%s {
 		if hasID && !strings.Contains(src, "\"strconv\"") {
 			src = strings.Replace(src, "import (", "import (\n\t\"strconv\"", 1)
 		}
-		if !strings.Contains(src, "\""+moduleName+"/proto/"+svcName+"/gen\"") {
-			src = strings.Replace(src, "import (", fmt.Sprintf("import (\n\tpb \"%s/proto/%s/gen\"", moduleName, svcName), 1)
+		if !strings.Contains(src, "\""+moduleName+"/internal/proto/"+svcName+"/gen\"") {
+			src = strings.Replace(src, "import (", fmt.Sprintf("import (\n\tpb \"%s/internal/proto/%s/gen\"", moduleName, svcName), 1)
 		}
 	} else if strings.Contains(src, "import \"") {
 		// Single import line, convert to block
@@ -273,8 +273,8 @@ func (t *%s) ToModel() *%s {
 		if hasID && !strings.Contains(src, "\"strconv\"") {
 			src = strings.Replace(src, "import (", "import (\n\t\"strconv\"", 1)
 		}
-		if !strings.Contains(src, "\""+moduleName+"/proto/"+svcName+"/gen\"") {
-			src = strings.Replace(src, "import (", fmt.Sprintf("import (\n\tpb \"%s/proto/%s/gen\"", moduleName, svcName), 1)
+		if !strings.Contains(src, "\""+moduleName+"/internal/proto/"+svcName+"/gen\"") {
+			src = strings.Replace(src, "import (", fmt.Sprintf("import (\n\tpb \"%s/internal/proto/%s/gen\"", moduleName, svcName), 1)
 		}
 	}
 
@@ -318,7 +318,7 @@ import (
 	"context"
 
 	"{{.Module}}/boot/server"
-	pb "{{.Module}}/proto/{{.Package}}/gen"
+	pb "{{.Module}}/internal/proto/{{.Package}}/gen"
 	"google.golang.org/grpc"
 )
 
@@ -354,7 +354,7 @@ func (t *{{$.Title}}GRPC) {{.}} {
 }
 
 func parseProtoMethods(serviceName string) ([]string, error) {
-	protoFile := filepath.Join("proto", serviceName, serviceName+".proto")
+	protoFile := filepath.Join("internal/proto", serviceName, serviceName+".proto")
 	content, err := os.ReadFile(protoFile)
 	if err != nil {
 		return nil, err

@@ -21,7 +21,7 @@ var appCmd = &cobra.Command{
 var appServeCmd = &cobra.Command{
 	Use:   "serve [command]",
 	Short: "Run the application or a locally defined GoForge task",
-	Long:  `Executes the specified command context inside the current GoForge project using go run cmd/main.go. Defaults to 'serve'.`,
+	Long:  `Executes the specified command context inside the current GoForge project using go run app/main.go. Defaults to 'serve'.`,
 	// We want to accept any number of arguments after `serve`
 	DisableFlagParsing: true,
 	Run: func(cmd *cobra.Command, args []string) {
@@ -29,9 +29,9 @@ var appServeCmd = &cobra.Command{
 
 		var execArgs []string
 		if len(args) == 0 {
-			execArgs = []string{"run", "cmd/main.go", "serve"}
+			execArgs = []string{"run", "app/main.go", "serve"}
 		} else {
-			execArgs = append([]string{"run", "cmd/main.go"}, args...)
+			execArgs = append([]string{"run", "app/main.go"}, args...)
 		}
 
 		proxy := exec.Command("go", execArgs...)

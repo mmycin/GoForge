@@ -1,66 +1,83 @@
 # Getting Started with GoForge
 
-This guide will walk you through setting up and using GoForge CLI to create your first GoForge project.
+This guide walks you through setting up and using GoForge CLI to create your first GoForge project.
 
 ## Prerequisites
-Before you begin, ensure you have the following installed:
-- **Go**: 1.21 or later ([Download Go](https://go.dev/doc/install))
-- **Atlas**: For database migrations ([Install Atlas](https://atlasgo.io/getting-started/))
-- **SQLC**: For type-safe SQL queries ([Install SQLC](https://sqlc.dev/))
-- **Protoc**: For gRPC support ([Install Protoc](https://grpc.io/docs/protoc-installation/))
+- **Go** 1.21 or later ([Download Go](https://go.dev/doc/install))
+- **Atlas** for database migrations ([Install Atlas](https://atlasgo.io/getting-started/))
+- **SQLC** for type-safe SQL queries ([Install SQLC](https://sqlc.dev/))
+- **Protoc** for gRPC support ([Install Protoc](https://grpc.io/docs/protoc-installation/))
 
 ## Step 1: Install GoForge CLI
-First, install the GoForge CLI globally on your system:
 
 ```bash
 go install github.com/mmycin/GoForge@latest
-```
-
-Verify the installation:
-```bash
 goforge version
 ```
 
 ## Step 2: Create a New Project
-Use the `new` command to generate a new GoForge project:
 
 ```bash
-goforge new my-awesome-project
-cd my-awesome-project
+goforge new my-project
+cd my-project
 ```
 
-This will create a fully configured project with all the necessary files and directories.
-
 ## Step 3: Configure Your Environment
-Copy the example environment file and generate a secure application key:
 
 ```bash
 cp .env.example .env
 goforge gen:key
 ```
 
-## Step 4: Explore Your Project
-Check out your new project structure:
+## Step 4: Project Structure
 
 ```text
-my-awesome-project/
-├── boot/               # Core framework bootstrapping
-├── cmd/                # Application entry point
-├── internal/           # Private application code
-│   ├── config/         # Configuration
-│   ├── console/        # Custom commands
-│   ├── database/       # Database setup
-│   └── services/       # Domain services
-├── proto/              # gRPC definitions
-├── tests/              # Test files
-├── .env.example        # Example environment file
-├── Dockerfile          # Docker configuration
-├── air.toml            # Live-reloading config
-├── atlas.hcl           # Atlas migration config
-└── sqlc.yaml           # SQLC config
+my-project/
+├── app/                         # Entry point
+│   └── main.go
+├── boot/                        # Framework bootstrap (do not edit)
+│   ├── kernel.go
+│   ├── client/
+│   └── server/
+│       └── middleware/
+├── core/                        # Framework packages — import freely, do not edit
+│   ├── config/
+│   ├── database/
+│   ├── errors/
+│   ├── validator/
+│   └── console/
+├── internal/                    # Your code — edit freely
+│   ├── services/
+│   │   ├── kernel.go            # Auto-generated — do not hand-edit
+│   │   └── <name>/              # One directory per service
+│   ├── database/
+│   │   ├── migrations/
+│   │   └── queries/
+│   ├── proto/
+│   │   └── <name>/
+│   └── tests/
+├── .env.example
+├── atlas.hcl
+├── sqlc.yaml
+├── air.toml
+└── Dockerfile
 ```
 
-## Step 5: Next Steps
-Now you're ready to start building! Check out:
-- [How to Generate a Service](./commands.md#gen-service)
-- [Database Migrations](./commands.md#database-commands)
+| Directory | Owner | Edit? |
+|-----------|-------|-------|
+| `boot/`   | Framework | No |
+| `core/`   | Framework | No |
+| `internal/services/` | You | Yes |
+| `internal/database/` | You | Yes |
+| `internal/proto/`    | You | Yes |
+| `internal/tests/`    | You | Yes |
+
+## Step 5: Start the server
+
+```bash
+goforge app serve
+```
+
+## Next Steps
+- [Commands reference](./commands.md)
+- [Configuration guide](./configuration.md)

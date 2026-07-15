@@ -77,7 +77,7 @@ var remSqlcCmd = &cobra.Command{
 	Long:  `Remove generated SQLC code and revert database kernel integration.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		Info("Removing SQLC integration...")
-		removeSqlc("internal/database/database.go")
+		removeSqlc("core/database/database.go")
 	},
 }
 
@@ -115,7 +115,7 @@ func genSqlc() {
 	}
 	Success("Code generation completed successfully")
 
-	injectSqlc("internal/database/database.go")
+	injectSqlc("core/database/database.go")
 }
 
 func transformQueries(engine string) error {
@@ -232,9 +232,9 @@ func injectSqlc(targetPath string) {
 		line := lines[i]
 		trimmed := strings.TrimSpace(line)
 
-		if !importAdded && strings.Contains(line, "internal/config") {
+		if !importAdded && strings.Contains(line, "core/config") {
 			newLines = append(newLines, line)
-			newLines = append(newLines, fmt.Sprintf("\tsqlc \"%s/internal/database/gen\"", moduleName))
+			newLines = append(newLines, fmt.Sprintf("\tsqlc \"%s/core/database/gen\"", moduleName))
 			importAdded = true
 			continue
 		}
@@ -293,7 +293,7 @@ func removeSqlc(targetPath string) {
 		line := lines[i]
 		trimmed := strings.TrimSpace(line)
 
-		if strings.Contains(line, "internal/database/gen") {
+		if strings.Contains(line, "core/database/gen") {
 			continue
 		}
 
@@ -322,7 +322,7 @@ func removeSqlc(targetPath string) {
 		Warning("Failed to remove SQLC support: %v", err)
 	}
 
-	genDir := "internal/database/gen"
+	genDir := "core/database/gen"
 	if _, err := os.Stat(genDir); err == nil {
 		Info("Deleting generated folder: %s", genDir)
 		os.RemoveAll(genDir)
@@ -542,7 +542,7 @@ func migrateDB() {
 
 	if migrator == "gorm" {
 		// First try to run the local migrate command if it exists in the template
-		cmd := exec.Command("go", "run", "cmd/main.go", "migrate")
+		cmd := exec.Command("go", "run", "app/main.go", "migrate")
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err == nil {
@@ -624,7 +624,7 @@ import (
 	"fmt"
 	"os"
 
-	"%s/internal/database"
+	"%s/core/database"
 	"%s/internal/services"
 )
 

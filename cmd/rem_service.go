@@ -26,7 +26,7 @@ var removeServiceCmd = &cobra.Command{
 
 func removeService(name string) {
 	servicesDir := filepath.Join("internal/services", name)
-	protoDir := filepath.Join("proto", name)
+	protoDir := filepath.Join("internal/proto", name)
 
 	// Check if service exists
 	if _, err := os.Stat(servicesDir); os.IsNotExist(err) {

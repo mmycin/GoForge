@@ -40,10 +40,11 @@ goforge gen:service <service-name>
 This command creates:
 - `internal/services/<service-name>/model.go`: The database model
 - `internal/services/<service-name>/service.go`: Business logic layer
-- `internal/services/<service-name>/handler.go`: HTTP handlers
+- `internal/services/<service-name>/handler.go`: HTTP handlers (with error handling and validation)
 - `internal/services/<service-name>/routes.go`: Route definitions
 - `internal/services/<service-name>/docs.go`: API documentation setup
 - `internal/services/<service-name>/grpc.go`: gRPC stub
+- `internal/proto/<service-name>/<service-name>.proto`: Proto definition
 - Updates `internal/services/kernel.go` with service registration
 
 ### `goforge rem:service`
@@ -93,7 +94,7 @@ Compile Protocol Buffer files into Go gRPC stubs.
 ```bash
 goforge gen:proto [service-name]
 ```
-If no service name is provided, all `.proto` files in `proto/` are compiled.
+If no service name is provided, all `.proto` files in `internal/proto/` are compiled.
 
 ### `goforge rem:proto`
 Remove all generated `.pb.go` files from your project.
@@ -119,4 +120,4 @@ Proxy commands to your application's own console. For example:
 # Start your application's server
 goforge app serve
 ```
-This runs `go run cmd/main.go serve` in your project.
+This runs `go run app/main.go serve` in your project.

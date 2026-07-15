@@ -61,7 +61,7 @@ func genService(name string) {
 import (
 	"context"
 
-	"%s/internal/database"
+	"%s/core/database"
 )
 
 type %sService struct {
@@ -78,6 +78,8 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	apperrors "%s/core/errors"
+	"%s/core/validator"
 )
 
 type %sHandler struct {
@@ -86,6 +88,12 @@ type %sHandler struct {
 
 func New%sHandler(service *%sService) *%sHandler {
 	return &%sHandler{service: service}
+}
+
+// Create%sRequest is the expected JSON body for creating a %s.
+type Create%sRequest struct {
+	// TODO: Add fields with validate tags, e.g.:
+	// Name string ` + "`" + `json:"name" validate:"required,min=1,max=255"` + "`" + `
 }
 
 func (h *%sHandler) GetAll(c *gin.Context) {
@@ -102,7 +110,23 @@ func (h *%sHandler) GetByID(c *gin.Context) {
 		"data":    id,
 	})
 }
-`, name, camelName, camelName, camelName, camelName, camelName, camelName, camelName),
+
+func (h *%sHandler) Create(c *gin.Context) {
+	var req Create%sRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		_ = c.Error(apperrors.ErrBadRequest("invalid request body").Wrap(err))
+		return
+	}
+	if appErr := validator.Validate(req); appErr != nil {
+		_ = c.Error(appErr)
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{
+		"message": "%s created",
+		"data":    req,
+	})
+}
+`, name, moduleName, moduleName, camelName, camelName, camelName, camelName, camelName, camelName, camelName, name, camelName, camelName, camelName, camelName, camelName, camelName),
 		"grpc.go": "package " + name + "\n",
 		"routes.go": fmt.Sprintf(`package %s
 
@@ -120,12 +144,13 @@ func New%sRoutes(handler *%sHandler) *%sRoutes {
 
 func (r *%sRoutes) Register(engine *gin.Engine) {
 	group := engine.Group("/api/%ss")
-	// Middleware is applied globally in server/http.go
+	// Middleware is applied globally in boot/server/http.go
 
 	group.GET("/", r.handler.GetAll)
 	group.GET("/:id", r.handler.GetByID)
+	group.POST("/", r.handler.Create)
 }
-`, name, camelName, camelName, camelName, camelName, camelName, camelName, name),
+`, name, camelName, camelName, camelName, camelName, camelName, camelName, camelName, name),
 		"docs.go": fmt.Sprintf(`package %s
 
 import (
@@ -173,7 +198,7 @@ func (d *%sDocs) Register(engine *gin.Engine) {
 	}
 
 	// Create proto directory and file
-	protoDir := filepath.Join("proto", name)
+	protoDir := filepath.Join("internal/proto", name)
 	if err := os.MkdirAll(protoDir, 0755); err != nil {
 		ErrorLog("Failed to create proto directory: %v", err)
 	} else {
@@ -182,7 +207,7 @@ func (d *%sDocs) Register(engine *gin.Engine) {
 
 package %s;
 
-option go_package = "%s/proto/%s/gen";
+option go_package = "%s/internal/proto/%s/gen";
 
 service %sService {
 	rpc Create(CreateRequest) returns (CreateResponse);
@@ -275,7 +300,7 @@ func registerModels(moduleName string) error {
 
 import (
 	"{{ .Module }}/boot/server"
-	"{{ .Module }}/internal/database"
+	"{{ .Module }}/core/database"
 {{- range .Services }}
 	"{{ $.Module }}/internal/services/{{ .Name }}"
 {{- end }}
