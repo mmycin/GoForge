@@ -58,16 +58,23 @@ func removeProto() error {
 	for _, e := range entries {
 		if e.IsDir() {
 			// Remove any .pb.go files in the service directory
-			files, _ := filepath.Glob(filepath.Join(servicesDir, e.Name(), "*.pb.go"))
+			files, err := filepath.Glob(filepath.Join(servicesDir, e.Name(), "*.pb.go"))
+			if err != nil {
+				Warning("Failed to find .pb.go files: %v", err)
+			}
 			for _, f := range files {
 				Info("  Removing %s", f)
-				os.Remove(f)
+				if err := os.Remove(f); err != nil {
+					Warning("Failed to remove %s: %v", f, err)
+				}
 			}
 			// Also look in gen/ if it exists
 			genDir := filepath.Join("proto", e.Name(), "gen")
 			if _, err := os.Stat(genDir); err == nil {
 				Info("  Removing %s", genDir)
-				os.RemoveAll(genDir)
+				if err := os.RemoveAll(genDir); err != nil {
+					Warning("Failed to remove %s: %v", genDir, err)
+				}
 			}
 		}
 	}
@@ -310,7 +317,7 @@ package {{.Package}}
 import (
 	"context"
 
-	"{{.Module}}/internal/server"
+	"{{.Module}}/boot/server"
 	pb "{{.Module}}/proto/{{.Package}}/gen"
 	"google.golang.org/grpc"
 )

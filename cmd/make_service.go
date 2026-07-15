@@ -86,7 +86,7 @@ func (h *%sHandler) GetByID(c *gin.Context) {
 
 import (
 	"github.com/gin-gonic/gin"
-	"%s/internal/server"
+	"%s/boot/server"
 )
 
 func init() {
@@ -114,7 +114,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humagin"
 	"github.com/gin-gonic/gin"
-	"%s/internal/server"
+	"%s/boot/server"
 )
 
 func init() {
@@ -254,7 +254,7 @@ func registerModels(moduleName string) error {
 	tmpl := `package services
 
 import (
-	"{{ .Module }}/internal/server"
+	"{{ .Module }}/boot/server"
 {{- range .Services }}
 	"{{ $.Module }}/internal/services/{{ .Name }}"
 {{- end }}
