@@ -56,6 +56,22 @@ func genService(name string) {
 	}
 
 	files := map[string]string{
+		"service.go": fmt.Sprintf(`package %s
+
+import (
+	"context"
+
+	"%s/internal/database"
+)
+
+type %sService struct {
+	db *database.Database
+}
+
+func New%sService(db *database.Database) *%sService {
+	return &%sService{db: db}
+}
+`, name, moduleName, camelName, camelName, camelName, camelName),
 		"handler.go": fmt.Sprintf(`package %s
 
 import (
@@ -64,7 +80,13 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-type %sHandler struct {}
+type %sHandler struct {
+	service *%sService
+}
+
+func New%sHandler(service *%sService) *%sHandler {
+	return &%sHandler{service: service}
+}
 
 func (h *%sHandler) GetAll(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
@@ -80,31 +102,30 @@ func (h *%sHandler) GetByID(c *gin.Context) {
 		"data":    id,
 	})
 }
-`, name, camelName, camelName, camelName),
+`, name, camelName, camelName, camelName, camelName, camelName, camelName, camelName),
 		"grpc.go": "package " + name + "\n",
 		"routes.go": fmt.Sprintf(`package %s
 
 import (
 	"github.com/gin-gonic/gin"
-	"%s/boot/server"
 )
 
-func init() {
-	server.Register(&%sRoutes{})
+type %sRoutes struct {
+	handler *%sHandler
 }
 
-type %sRoutes struct{}
+func New%sRoutes(handler *%sHandler) *%sRoutes {
+	return &%sRoutes{handler: handler}
+}
 
 func (r *%sRoutes) Register(engine *gin.Engine) {
-	h := &%sHandler{}
-
 	group := engine.Group("/api/%ss")
 	// Middleware is applied globally in server/http.go
 
-	group.GET("/", h.GetAll)
-	group.GET("/:id", h.GetByID)
+	group.GET("/", r.handler.GetAll)
+	group.GET("/:id", r.handler.GetByID)
 }
-`, name, moduleName, camelName, camelName, camelName, camelName, name),
+`, name, camelName, camelName, camelName, camelName, camelName, camelName, name),
 		"docs.go": fmt.Sprintf(`package %s
 
 import (
@@ -117,11 +138,11 @@ import (
 	"%s/boot/server"
 )
 
-func init() {
-	server.Register(&%sDocs{})
-}
-
 type %sDocs struct{}
+
+func New%sDocs() *%sDocs {
+	return &%sDocs{}
+}
 
 func (d *%sDocs) Register(engine *gin.Engine) {
 	config := server.NewHumaConfig("%s API", "1.0.0", "/api/docs/%s")
@@ -141,8 +162,7 @@ func (d *%sDocs) Register(engine *gin.Engine) {
 		return &struct{ Body string }{Body: "OK"}, nil
 	})
 }
-`, name, moduleName, camelName, camelName, camelName, name, name, name),
-		"service.go": "package " + name + "\n",
+`, name, moduleName, camelName, camelName, camelName, camelName, camelName, name, name, name),
 		"model.go": fmt.Sprintf("package %s\n\nimport \"time\"\n\ntype %s struct {\n\tID        uint      `gorm:\"primaryKey;autoIncrement\" json:\"id\"`\n\tCreatedAt time.Time `gorm:\"autoCreateTime\" json:\"created_at\"`\n\tUpdatedAt time.Time `gorm:\"autoUpdateTime\" json:\"updated_at\"`\n}\n\nfunc (t *%s) To%sModel() *%s {\n\treturn &%s{\n\t\tID:        t.ID,\n\t\tCreatedAt: t.CreatedAt,\n\t\tUpdatedAt: t.UpdatedAt,\n\t}\n}\n", name, camelName, camelName, camelName, camelName, camelName),
 	}
 
@@ -255,14 +275,30 @@ func registerModels(moduleName string) error {
 
 import (
 	"{{ .Module }}/boot/server"
+	"{{ .Module }}/internal/database"
 {{- range .Services }}
 	"{{ $.Module }}/internal/services/{{ .Name }}"
 {{- end }}
 )
 
-// GetRouters returns all service routers to be registered
-func GetRouters() []server.Router {
-	return server.GetRegisteredRouters()
+// ServicesConfig contains all dependencies needed to initialize services
+type ServicesConfig struct {
+	DB *database.Database
+}
+
+// InitializeServices initializes all services and returns routers and gRPC registries
+func InitializeServices(cfg ServicesConfig) ([]server.Router, []server.GRPCRegistry) {
+	var routers []server.Router
+	var grpcRegistries []server.GRPCRegistry
+{{- range .Services }}
+	// Initialize {{ .Name }} service
+	{{ .Name }}Service := {{ .Name }}.New{{ title .Name }}Service(cfg.DB)
+	{{ .Name }}Handler := {{ .Name }}.New{{ title .Name }}Handler({{ .Name }}Service)
+	{{ .Name }}Routes := {{ .Name }}.New{{ title .Name }}Routes({{ .Name }}Handler)
+	{{ .Name }}Docs := {{ .Name }}.New{{ title .Name }}Docs()
+	routers = append(routers, {{ .Name }}Routes, {{ .Name }}Docs)
+{{- end }}
+	return routers, grpcRegistries
 }
 
 // Model returns all models to be registered with GORM
