@@ -11,6 +11,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// atlasConfigURI is the Atlas --config value.
+// Atlas requires the file:// scheme regardless of OS.
+const atlasConfigURI = "file://core/database/atlas.hcl"
+
+// sqlcConfig is the sqlc --file value pointing to the config moved to core/database/.
+const sqlcConfig = "core/database/sqlc.yaml"
+
 func init() {
 	rootCmd.AddCommand(migrateCmd)
 	rootCmd.AddCommand(genMigrationCmd)
@@ -106,7 +113,7 @@ func genSqlc() {
 	}
 
 	Info("Executing sqlc generate...")
-	cmd := exec.Command("sqlc", "generate")
+	cmd := exec.Command("sqlc", "generate", "--file", sqlcConfig)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
@@ -159,7 +166,7 @@ func transformQueries(engine string) error {
 }
 
 func updateSqlcConfig() error {
-and	configPath := "core/database/sqlc.yaml"
+	configPath := "core/database/sqlc.yaml"
 	content, err := os.ReadFile(configPath)
 	if err != nil {
 		return err
@@ -360,7 +367,7 @@ func remMigration() {
 
 	atlasEnv := os.Environ()
 	atlasEnv = append(atlasEnv, "DB_CONNECTION="+dbConn)
-	cmd := exec.Command("atlas", "migrate", "hash", "--env", "gorm", "--config", "core/database/atlas.hcl")
+	cmd := exec.Command("atlas", "migrate", "hash", "--env", "gorm", "--config", atlasConfigURI)
 	cmd.Env = atlasEnv
 	if err := cmd.Run(); err != nil {
 		Warning("Atlas hash update failed: %v", err)
@@ -418,7 +425,7 @@ func genMigration(name string) {
 	atlasEnv = append(atlasEnv, "DB_DEV_NAME="+dbDevName)
 
 	Info("Running atlas migrate diff...")
-	cmd := exec.Command("atlas", "migrate", "diff", "--env", "gorm", "--config", "core/database/atlas.hcl", name)
+	cmd := exec.Command("atlas", "migrate", "diff", "--env", "gorm", "--config", atlasConfigURI, name)
 	cmd.Env = atlasEnv
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -463,7 +470,7 @@ func genMigration(name string) {
 	}
 
 	Info("Running atlas migrate hash...")
-	cmd = exec.Command("atlas", "migrate", "hash", "--env", "gorm", "--config", "core/database/atlas.hcl")
+	cmd = exec.Command("atlas", "migrate", "hash", "--env", "gorm", "--config", atlasConfigURI)
 	cmd.Env = atlasEnv
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -599,7 +606,7 @@ func migrateDB() {
 	atlasEnv = append(atlasEnv, "DB_PORT="+dbPort)
 	atlasEnv = append(atlasEnv, "DB_DEV_NAME="+dbDevName)
 
-	cmd := exec.Command("atlas", "migrate", "apply", "--env", "gorm")
+	cmd := exec.Command("atlas", "migrate", "apply", "--env", "gorm", "--config", atlasConfigURI)
 	cmd.Env = atlasEnv
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
