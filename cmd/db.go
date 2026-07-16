@@ -159,7 +159,7 @@ func transformQueries(engine string) error {
 }
 
 func updateSqlcConfig() error {
-	configPath := "sqlc.yaml"
+and	configPath := "core/database/sqlc.yaml"
 	content, err := os.ReadFile(configPath)
 	if err != nil {
 		return err
@@ -360,7 +360,7 @@ func remMigration() {
 
 	atlasEnv := os.Environ()
 	atlasEnv = append(atlasEnv, "DB_CONNECTION="+dbConn)
-	cmd := exec.Command("atlas", "migrate", "hash", "--env", "gorm")
+	cmd := exec.Command("atlas", "migrate", "hash", "--env", "gorm", "--config", "core/database/atlas.hcl")
 	cmd.Env = atlasEnv
 	if err := cmd.Run(); err != nil {
 		Warning("Atlas hash update failed: %v", err)
@@ -418,7 +418,7 @@ func genMigration(name string) {
 	atlasEnv = append(atlasEnv, "DB_DEV_NAME="+dbDevName)
 
 	Info("Running atlas migrate diff...")
-	cmd := exec.Command("atlas", "migrate", "diff", "--env", "gorm", name)
+	cmd := exec.Command("atlas", "migrate", "diff", "--env", "gorm", "--config", "core/database/atlas.hcl", name)
 	cmd.Env = atlasEnv
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -463,7 +463,7 @@ func genMigration(name string) {
 	}
 
 	Info("Running atlas migrate hash...")
-	cmd = exec.Command("atlas", "migrate", "hash", "--env", "gorm")
+	cmd = exec.Command("atlas", "migrate", "hash", "--env", "gorm", "--config", "core/database/atlas.hcl")
 	cmd.Env = atlasEnv
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
