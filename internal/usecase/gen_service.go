@@ -243,7 +243,7 @@ func removeModelFuncFromKernel(fsys infra.FileSystem, path string) error {
 // writeInitialKernel creates kernel.go for the very first time.
 // This is the developer's file — only written once, never overwritten.
 func writeInitialKernel(fsys infra.FileSystem, modulePath string, services []svcInfo) error {
-	const initialTmpl = `package services
+const initialTmpl = `package services
 
 import (
 	"{{.ModulePath}}/boot/server"
@@ -265,7 +265,7 @@ func InitializeServices(cfg ServicesConfig) ([]server.Router, []server.GRPCRegis
 	var routers []server.Router
 	var grpcRegistries []server.GRPCRegistry
 {{- range .Services}}
-	{{.Name}}Svc    := {{.Name}}.New{{title .Name}}Service(cfg.DB)
+	{{.Name}}Svc     := {{.Name}}.New{{title .Name}}Service(cfg.DB)
 	{{.Name}}Handler := {{.Name}}.New{{title .Name}}Handler({{.Name}}Svc)
 	{{.Name}}Routes  := {{.Name}}.New{{title .Name}}Routes({{.Name}}Handler)
 	{{.Name}}Docs    := {{.Name}}.New{{title .Name}}Docs()

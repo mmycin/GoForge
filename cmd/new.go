@@ -17,16 +17,17 @@ var modulePathRe = regexp.MustCompile(`^[a-zA-Z0-9._\-]+(/[a-zA-Z0-9._\-]+)+$`)
 
 func newNewCmd(d *Deps) *cobra.Command {
 	return &cobra.Command{
-		Use:   "new",
+		Use:   "new [project-name] [module-path]",
 		Short: "Create a new GoForge project",
-		Long:  `Launch a 4-step wizard to scaffold a new GoForge project from the official template.`,
+		Long:  `Launch a 4-step wizard to scaffold a new GoForge project from the official template, or pass project name and module path directly.`,
+		Args:  cobra.MaximumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runNewWizard(d)
+			return runNewWizard(d, args)
 		},
 	}
 }
 
-func runNewWizard(d *Deps) error {
+func runNewWizard(d *Deps, args []string) error {
 	var (
 		projectName string
 		modulePath  string
@@ -36,78 +37,102 @@ func runNewWizard(d *Deps) error {
 
 	gitAvailable := d.Git.IsAvailable()
 
-	// ── Step 1-4: huh form ────────────────────────────────────────────────────
-	form := huh.NewForm(
-		// Step 1 — Project name
-		huh.NewGroup(
-			huh.NewInput().
-				Title("Project Name").
-				Description("The folder name for your project. Use kebab-case.").
-				Placeholder("my-app").
-				Value(&projectName).
-				Validate(func(s string) error {
-					if strings.TrimSpace(s) == "" {
-						return fmt.Errorf("project name is required")
-					}
-					return nil
-				}),
-		),
-		// Step 2 — Module path
-		huh.NewGroup(
-			huh.NewInput().
-				Title("Module Path").
-				Description("e.g. github.com/yourname/my-app\nUsed as the root Go import path throughout the project.").
-				Placeholder("github.com/yourname/my-app").
-				Value(&modulePath).
-				Validate(func(s string) error {
-					s = strings.TrimSpace(s)
-					if s == "" {
-						return fmt.Errorf("module path is required")
-					}
-					if s == "github.com/" || strings.HasSuffix(s, "/") {
-						return fmt.Errorf("please provide a full path, e.g. github.com/you/my-app")
-					}
-					if !modulePathRe.MatchString(s) {
-						return fmt.Errorf("must be a valid Go module path")
-					}
-					return nil
-				}),
-		),
-		// Step 3 — Databases
-		huh.NewGroup(
-			huh.NewMultiSelect[string]().
-				Title("Select Databases").
-				Description("At least one is required. SQLite is always safe for development.").
-				Options(
-					huh.NewOption("SQLite  — zero-config, great for development", "sqlite"),
-					huh.NewOption("MySQL   — popular relational database", "mysql"),
-					huh.NewOption("PostgreSQL — advanced open-source RDBMS", "postgresql"),
-					huh.NewOption("SQL Server — Microsoft enterprise database", "sqlserver"),
-				).
-				Value(&databases).
-				Validate(func(s []string) error {
-					if len(s) == 0 {
-						return fmt.Errorf("select at least one database")
-					}
-					return nil
-				}),
-		),
-		// Step 4 — Git init (only if git is available)
-		huh.NewGroup(
-			huh.NewConfirm().
-				Title("Initialize a Git repository?").
-				Description(gitDescription(gitAvailable)).
-				Value(&initGit),
-		),
-	).WithTheme(huh.ThemeCatppuccin())
-
-	p := tea.NewProgram(newWizardRunner(form, "New Project", 4), tea.WithAltScreen())
-	if _, err := p.Run(); err != nil {
-		return err
+	if len(args) == 1 {
+		return fmt.Errorf("please provide both project name and module path")
 	}
-	if form.State == huh.StateAborted {
-		tui.Info("Cancelled — no project was created.")
-		return nil
+
+	if len(args) == 2 {
+		projectName = strings.TrimSpace(args[0])
+		modulePath = strings.TrimSpace(args[1])
+		databases = []string{"sqlite"}
+
+		if projectName == "" {
+			return fmt.Errorf("project name is required")
+		}
+		if modulePath == "" {
+			return fmt.Errorf("module path is required")
+		}
+		if modulePath == "github.com/" || strings.HasSuffix(modulePath, "/") {
+			return fmt.Errorf("please provide a full path, e.g. github.com/you/my-app")
+		}
+		if !modulePathRe.MatchString(modulePath) {
+			return fmt.Errorf("must be a valid Go module path")
+		}
+	} else {
+
+		// ── Step 1-4: huh form ────────────────────────────────────────────────
+		form := huh.NewForm(
+			// Step 1 — Project name
+			huh.NewGroup(
+				huh.NewInput().
+					Title("Project Name").
+					Description("The folder name for your project. Use kebab-case.").
+					Placeholder("my-app").
+					Value(&projectName).
+					Validate(func(s string) error {
+						if strings.TrimSpace(s) == "" {
+							return fmt.Errorf("project name is required")
+						}
+						return nil
+					}),
+			),
+			// Step 2 — Module path
+			huh.NewGroup(
+				huh.NewInput().
+					Title("Module Path").
+					Description("e.g. github.com/yourname/my-app\nUsed as the root Go import path throughout the project.").
+					Placeholder("github.com/yourname/my-app").
+					Value(&modulePath).
+					Validate(func(s string) error {
+						s = strings.TrimSpace(s)
+						if s == "" {
+							return fmt.Errorf("module path is required")
+						}
+						if s == "github.com/" || strings.HasSuffix(s, "/") {
+							return fmt.Errorf("please provide a full path, e.g. github.com/you/my-app")
+						}
+						if !modulePathRe.MatchString(s) {
+							return fmt.Errorf("must be a valid Go module path")
+						}
+						return nil
+					}),
+			),
+			// Step 3 — Databases
+			huh.NewGroup(
+				huh.NewMultiSelect[string]().
+					Title("Select Databases").
+					Description("At least one is required. SQLite is always safe for development.").
+					Options(
+						huh.NewOption("SQLite  — zero-config, great for development", "sqlite"),
+						huh.NewOption("MySQL   — popular relational database", "mysql"),
+						huh.NewOption("PostgreSQL — advanced open-source RDBMS", "postgresql"),
+						huh.NewOption("SQL Server — Microsoft enterprise database", "sqlserver"),
+					).
+					Value(&databases).
+					Validate(func(s []string) error {
+						if len(s) == 0 {
+							return fmt.Errorf("select at least one database")
+						}
+						return nil
+					}),
+			),
+			// Step 4 — Git init (only if git is available)
+			huh.NewGroup(
+				huh.NewConfirm().
+					Title("Initialize a Git repository?").
+					Description(gitDescription(gitAvailable)).
+					Value(&initGit),
+			),
+		).WithTheme(huh.ThemeCatppuccin())
+
+		p := tea.NewProgram(newWizardRunner(form, "New Project", 4), tea.WithAltScreen())
+		if _, err := p.Run(); err != nil {
+			return err
+		}
+		if form.State == huh.StateAborted {
+			tui.Info("Cancelled — no project was created.")
+			return nil
+		}
 	}
 
 	// Sanitise

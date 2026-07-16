@@ -18,10 +18,10 @@ func NewRemCommandUseCase(fs infra.FileSystem) *RemCommandUseCase {
 	return &RemCommandUseCase{fs: fs}
 }
 
-// Run removes internal/console/<safe>_cmd.go.
+// Run removes core/console/<safe>_cmd.go.
 func (uc *RemCommandUseCase) Run(name string, progress Progress) error {
 	safeID := scaffold.SafeIdentifier(name)
-	target := filepath.Join("internal", "console", safeID+"_cmd.go")
+	target := filepath.Join("core", "console", safeID+"_cmd.go")
 
 	if _, err := uc.fs.Stat(target); err != nil {
 		return fmt.Errorf("command file %q does not exist at %s", name, target)

@@ -51,7 +51,7 @@ func (uc *GenEventUseCase) Run(serviceName, modulePath string, progress Progress
 			return err
 		}
 		generated = append(generated, GeneratedFile{Path: f.dest})
-		send(progress, StepDone{Label: "Written " + filepath.Base(f.dest)})
+		send(progress, StepDone{Label: "Writing " + filepath.Base(f.dest)})
 	}
 
 	send(progress, UseCaseDone{Files: generated})

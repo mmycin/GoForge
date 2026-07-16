@@ -3,6 +3,7 @@ package usecase
 import (
 	"bytes"
 	"context"
+	"os/exec"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -26,6 +27,14 @@ func NewGenProtoUseCase(gen *scaffold.Generator, fs infra.FileSystem, exec infra
 
 // Run compiles proto files for serviceName (empty = all services).
 func (uc *GenProtoUseCase) Run(serviceName, modulePath string, progress Progress) error {
+	for _, tool := range []string{"protoc", "protoc-gen-go", "protoc-gen-go-grpc"} {
+		if _, err := exec.LookPath(tool); err != nil {
+			send(progress, LogLine{Level: "error", Text: fmt.Sprintf("%s is not installed or not in PATH.", tool)})
+			send(progress, UseCaseDone{})
+			return fmt.Errorf("%s not found", tool)
+		}
+	}
+
 	protoDir := "internal/proto"
 
 	var protoFiles []string

@@ -16,7 +16,7 @@ func newGenCommandCmd(d *Deps) *cobra.Command {
 	return &cobra.Command{
 		Use:   "gen:command [name]",
 		Short: "Create a custom console command",
-		Long:  `Generate a new CLI command file in internal/console/. Run it via: goforge app run <name>.`,
+		Long:  `Generate a new CLI command file in core/console/. Run it via: goforge app run <name>.`,
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := ""
@@ -81,7 +81,7 @@ func newRemCommandCmd(d *Deps) *cobra.Command {
 	return &cobra.Command{
 		Use:   "rem:command [name]",
 		Short: "Delete a custom console command",
-		Long:  `Permanently delete the command file at internal/console/<name>_cmd.go.`,
+		Long:  `Permanently delete the command file at core/console/<name>_cmd.go.`,
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runRemCommand(d, args[0])
@@ -91,7 +91,7 @@ func newRemCommandCmd(d *Deps) *cobra.Command {
 
 func runRemCommand(d *Deps, name string) error {
 	body := fmt.Sprintf(
-		"This will permanently delete:\n\n  • internal/console/%s_cmd.go\n\nThis cannot be undone.",
+		"This will permanently delete:\n\n  • core/console/%s_cmd.go\n\nThis cannot be undone.",
 		name,
 	)
 

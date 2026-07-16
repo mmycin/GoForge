@@ -47,13 +47,13 @@ func (uc *GenConfigUseCase) Run(name, modulePath string, progress Progress) erro
 		send(progress, StepFailed{Label: targetFile, Err: err})
 		return err
 	}
-	send(progress, StepDone{Label: fmt.Sprintf("Written core/config/%s.go", name)})
+	send(progress, StepDone{Label: fmt.Sprintf("Writing core/config/%s.go", name)})
 
 	send(progress, StepStarted{Label: "Wiring into core/config/config.go"})
 	if err := uc.wireIntoAllConfig(name, camel); err != nil {
 		send(progress, LogLine{Level: "warn", Text: fmt.Sprintf("auto-wire failed: %v", err)})
 	} else {
-		send(progress, StepDone{Label: "Wired into core/config/config.go"})
+		send(progress, StepDone{Label: "Wiring into core/config/config.go"})
 	}
 
 	send(progress, UseCaseDone{Files: []GeneratedFile{
