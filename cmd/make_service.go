@@ -2,401 +2,146 @@ package cmd
 
 import (
 	"fmt"
-	"go/ast"
-	"go/parser"
-	"go/token"
-	"os"
-	"path/filepath"
 	"strings"
-	"text/template"
-	"unicode"
 
+	"github.com/charmbracelet/huh"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/mmycin/GoForge/internal/env"
+	"github.com/mmycin/GoForge/internal/tui"
+	"github.com/mmycin/GoForge/internal/tui/progress"
+	"github.com/mmycin/GoForge/internal/tui/result"
+	"github.com/mmycin/GoForge/internal/usecase"
 	"github.com/spf13/cobra"
 )
 
-func init() {
-	rootCmd.AddCommand(makeServiceCmd)
-}
-
-var makeServiceCmd = &cobra.Command{
-	Use:   "gen:service [name]",
-	Short: "Create a new service",
-	Long:  `Generate a new service with handler, repository, model, routes, and proto files.`,
-	Args:  cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
-		name := args[0]
-		Info("Creating service: %s", name)
-		genService(name)
-	},
-}
-
-func genService(name string) {
-	targetDir := filepath.Join("internal/services", name)
-
-	if _, err := os.Stat(targetDir); err == nil {
-		ErrorLog("Service '%s' already exists", name)
-		os.Exit(1)
-	}
-
-	if err := os.MkdirAll(targetDir, 0755); err != nil {
-		ErrorLog("Failed to create directory: %v", err)
-		os.Exit(1)
-	}
-
-	camelName := toCamelCase(name)
-
-	// Load the module name from local environment
-	cfg, err := env.Load()
-	moduleName := "github.com/mmycin/goforge"
-	if err == nil && cfg.Module != "" {
-		moduleName = cfg.Module
-	} else {
-		Warning("Could not read module from go.mod, using default: %s", moduleName)
-	}
-
-	files := map[string]string{
-		"service.go": fmt.Sprintf(`package %s
-
-import (
-	"context"
-
-	"%s/core/database"
-)
-
-type %sService struct {
-	db *database.Database
-}
-
-func New%sService(db *database.Database) *%sService {
-	return &%sService{db: db}
-}
-`, name, moduleName, camelName, camelName, camelName, camelName),
-		"handler.go": fmt.Sprintf(`package %s
-
-import (
-	"net/http"
-
-	"github.com/gin-gonic/gin"
-	apperrors "%s/core/errors"
-	"%s/core/validator"
-)
-
-type %sHandler struct {
-	service *%sService
-}
-
-func New%sHandler(service *%sService) *%sHandler {
-	return &%sHandler{service: service}
-}
-
-// Create%sRequest is the expected JSON body for creating a %s.
-type Create%sRequest struct {
-	// TODO: Add fields with validate tags, e.g.:
-	// Name string ` + "`" + `json:"name" validate:"required,min=1,max=255"` + "`" + `
-}
-
-func (h *%sHandler) GetAll(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
-		"message": "Data retrieved",
-		"data":    []string{},
-	})
-}
-
-func (h *%sHandler) GetByID(c *gin.Context) {
-	id := c.Param("id")
-	c.JSON(http.StatusOK, gin.H{
-		"message": "Detail retrieved",
-		"data":    id,
-	})
-}
-
-func (h *%sHandler) Create(c *gin.Context) {
-	var req Create%sRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		_ = c.Error(apperrors.ErrBadRequest("invalid request body").Wrap(err))
-		return
-	}
-	if appErr := validator.Validate(req); appErr != nil {
-		_ = c.Error(appErr)
-		return
-	}
-	c.JSON(http.StatusCreated, gin.H{
-		"message": "%s created",
-		"data":    req,
-	})
-}
-`, name, moduleName, moduleName, camelName, camelName, camelName, camelName, camelName, camelName, camelName, name, camelName, camelName, camelName, camelName, camelName, camelName),
-		"grpc.go": "package " + name + "\n",
-		"routes.go": fmt.Sprintf(`package %s
-
-import (
-	"github.com/gin-gonic/gin"
-)
-
-type %sRoutes struct {
-	handler *%sHandler
-}
-
-func New%sRoutes(handler *%sHandler) *%sRoutes {
-	return &%sRoutes{handler: handler}
-}
-
-func (r *%sRoutes) Register(engine *gin.Engine) {
-	group := engine.Group("/api/%ss")
-	// Middleware is applied globally in boot/server/http.go
-
-	group.GET("/", r.handler.GetAll)
-	group.GET("/:id", r.handler.GetByID)
-	group.POST("/", r.handler.Create)
-}
-`, name, camelName, camelName, camelName, camelName, camelName, camelName, camelName, name),
-		"docs.go": fmt.Sprintf(`package %s
-
-import (
-	"context"
-	"net/http"
-
-	"github.com/danielgtaylor/huma/v2"
-	"github.com/danielgtaylor/huma/v2/adapters/humagin"
-	"github.com/gin-gonic/gin"
-	"%s/boot/server"
-)
-
-type %sDocs struct{}
-
-func New%sDocs() *%sDocs {
-	return &%sDocs{}
-}
-
-func (d *%sDocs) Register(engine *gin.Engine) {
-	config := server.NewHumaConfig("%s API", "1.0.0", "/api/docs/%s")
-	
-	// Create API instance
-	api := humagin.New(engine, config)
-	
-	// Register health check
-	huma.Register(api, huma.Operation{
-		OperationID: "get-health",
-		Method:      http.MethodGet,
-		Path:        "/api/%s/health",
-		Summary:     "Health check",
-		Description: "Check if the service is healthy",
-		Tags:        []string{"Health"},
-	}, func(ctx context.Context, input *struct{}) (*struct{ Body string }, error) {
-		return &struct{ Body string }{Body: "OK"}, nil
-	})
-}
-`, name, moduleName, camelName, camelName, camelName, camelName, camelName, name, name, name),
-		"model.go": fmt.Sprintf("package %s\n\nimport \"time\"\n\ntype %s struct {\n\tID        uint      `gorm:\"primaryKey;autoIncrement\" json:\"id\"`\n\tCreatedAt time.Time `gorm:\"autoCreateTime\" json:\"created_at\"`\n\tUpdatedAt time.Time `gorm:\"autoUpdateTime\" json:\"updated_at\"`\n}\n\nfunc (t *%s) To%sModel() *%s {\n\treturn &%s{\n\t\tID:        t.ID,\n\t\tCreatedAt: t.CreatedAt,\n\t\tUpdatedAt: t.UpdatedAt,\n\t}\n}\n", name, camelName, camelName, camelName, camelName, camelName),
-	}
-
-	for fname, content := range files {
-		if err := os.WriteFile(filepath.Join(targetDir, fname), []byte(content), 0644); err != nil {
-			ErrorLog("Failed to write %s: %v", fname, err)
-		}
-	}
-
-	// Create proto directory and file
-	protoDir := filepath.Join("internal/proto", name)
-	if err := os.MkdirAll(protoDir, 0755); err != nil {
-		ErrorLog("Failed to create proto directory: %v", err)
-	} else {
-		// Proto content stays similar but ensure package name is simple
-		protoContent := fmt.Sprintf(`syntax = "proto3";
-
-package %s;
-
-option go_package = "%s/internal/proto/%s/gen";
-
-service %sService {
-	rpc Create(CreateRequest) returns (CreateResponse);
-	rpc Get(GetRequest) returns (GetResponse);
-	rpc List(ListRequest) returns (ListResponse);
-	rpc Update(UpdateRequest) returns (UpdateResponse);
-	rpc Delete(DeleteRequest) returns (DeleteResponse);
-}
-
-message %s {
-	string id = 1;
-	string created_at = 2;
-	string updated_at = 3;
-}
-
-message CreateRequest {}
-message CreateResponse {}
-
-message GetRequest { string id = 1; }
-message GetResponse {}
-
-message ListRequest { int32 page = 1; int32 limit = 2; }
-message ListResponse {}
-
-message UpdateRequest { string id = 1; }
-message UpdateResponse {}
-
-message DeleteRequest { string id = 1; }
-message DeleteResponse {}
-`, name, moduleName, name, camelName, camelName)
-
-		if err := os.WriteFile(filepath.Join(protoDir, name+".proto"), []byte(protoContent), 0644); err != nil {
-			ErrorLog("Failed to write proto file: %v", err)
-		}
-	}
-
-	if err := registerModels(moduleName); err != nil {
-		Warning("Could not automatically update kernel.go: %v", err)
-	}
-
-	Success("Service '%s' created successfully and auto-registered in kernel.go", name)
-}
-
-func toCamelCase(s string) string {
-	parts := strings.Split(s, "_")
-	for i, part := range parts {
-		if len(part) > 0 {
-			r := []rune(part)
-			r[0] = unicode.ToUpper(r[0])
-			parts[i] = string(r)
-		}
-	}
-	return strings.Join(parts, "")
-}
-
-func registerModels(moduleName string) error {
-	servicesDir := "internal/services"
-	entries, err := os.ReadDir(servicesDir)
-	if err != nil {
-		return err
-	}
-
-	type ServiceInfo struct {
-		Name   string
-		Models []string
-	}
-
-	var services []ServiceInfo
-	for _, e := range entries {
-		if e.IsDir() {
-			modelPath := filepath.Join(servicesDir, e.Name(), "model.go")
-			if _, err := os.Stat(modelPath); err == nil {
-				models, err := findModelsInFile(modelPath)
-				if err != nil {
-					Warning("Could not parse models in %s: %v", modelPath, err)
-					// Fallback to title case of service name if parsing fails
-					models = []string{toCamelCase(e.Name())}
-				}
-				if len(models) > 0 {
-					services = append(services, ServiceInfo{
-						Name:   e.Name(),
-						Models: models,
-					})
-				}
+func newGenServiceCmd(d *Deps) *cobra.Command {
+	return &cobra.Command{
+		Use:   "gen:service [name]",
+		Short: "Scaffold a new service layer",
+		Long:  `Generate a new service with handler, model, routes, docs, proto, and gRPC stub files.`,
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name := ""
+			if len(args) == 1 {
+				name = args[0]
 			}
-		}
-	}
-
-	tmpl := `package services
-
-import (
-	"{{ .Module }}/boot/server"
-	"{{ .Module }}/core/database"
-{{- range .Services }}
-	"{{ $.Module }}/internal/services/{{ .Name }}"
-{{- end }}
-)
-
-// ServicesConfig contains all dependencies needed to initialize services
-type ServicesConfig struct {
-	DB *database.Database
-}
-
-// InitializeServices initializes all services and returns routers and gRPC registries
-func InitializeServices(cfg ServicesConfig) ([]server.Router, []server.GRPCRegistry) {
-	var routers []server.Router
-	var grpcRegistries []server.GRPCRegistry
-{{- range .Services }}
-	// Initialize {{ .Name }} service
-	{{ .Name }}Service := {{ .Name }}.New{{ title .Name }}Service(cfg.DB)
-	{{ .Name }}Handler := {{ .Name }}.New{{ title .Name }}Handler({{ .Name }}Service)
-	{{ .Name }}Routes := {{ .Name }}.New{{ title .Name }}Routes({{ .Name }}Handler)
-	{{ .Name }}Docs := {{ .Name }}.New{{ title .Name }}Docs()
-	routers = append(routers, {{ .Name }}Routes, {{ .Name }}Docs)
-{{- end }}
-	return routers, grpcRegistries
-}
-
-// Model returns all models to be registered with GORM
-func Model() []any {
-	return []any{
-{{- range $service := .Services }}
-	{{- range .Models }}
-		&{{ $service.Name }}.{{ . }}{},
-	{{- end }}
-{{- end }}
-	}
-}
-`
-	funcMap := template.FuncMap{
-		"title": func(s string) string {
-			parts := strings.Split(s, "_")
-			for i, part := range parts {
-				if len(part) > 0 {
-					r := []rune(part)
-					r[0] = unicode.ToUpper(r[0])
-					parts[i] = string(r)
-				}
-			}
-			return strings.Join(parts, "")
+			return runGenService(d, name)
 		},
 	}
-
-	t, err := template.New("kernel").Funcs(funcMap).Parse(tmpl)
-	if err != nil {
-		return err
-	}
-
-	f, err := os.Create("internal/services/kernel.go")
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	data := struct {
-		Module   string
-		Services []ServiceInfo
-	}{
-		Module:   moduleName,
-		Services: services,
-	}
-
-	return t.Execute(f, data)
 }
 
-func findModelsInFile(path string) ([]string, error) {
-	fset := token.NewFileSet()
-	node, err := parser.ParseFile(fset, path, nil, 0)
-	if err != nil {
-		return nil, err
+func runGenService(d *Deps, name string) error {
+	// Collect name via TUI if not supplied.
+	if name == "" {
+		var input string
+		form := huh.NewForm(huh.NewGroup(
+			huh.NewInput().
+				Title("Service Name").
+				Description("Use snake_case. Files go to internal/services/<name>/").
+				Placeholder("product_catalog").
+				Value(&input).
+				Validate(func(s string) error {
+					if strings.TrimSpace(s) == "" {
+						return fmt.Errorf("service name is required")
+					}
+					return nil
+				}),
+		)).WithTheme(huh.ThemeCatppuccin())
+
+		p := tea.NewProgram(newWizardRunner(form, "New Service", 1), tea.WithAltScreen())
+		if _, err := p.Run(); err != nil {
+			return err
+		}
+		if form.State == huh.StateAborted {
+			tui.Info("Cancelled.")
+			return nil
+		}
+		name = strings.TrimSpace(input)
 	}
 
-	var models []string
-	for _, f := range node.Decls {
-		genDecl, ok := f.(*ast.GenDecl)
-		if !ok || genDecl.Tok != token.TYPE {
-			continue
-		}
+	if name == "" {
+		tui.Info("Cancelled.")
+		return nil
+	}
 
-		for _, spec := range genDecl.Specs {
-			typeSpec, ok := spec.(*ast.TypeSpec)
-			if !ok {
-				continue
-			}
-			// Check if it's a struct and exported
-			if _, ok := typeSpec.Type.(*ast.StructType); ok && ast.IsExported(typeSpec.Name.Name) {
-				models = append(models, typeSpec.Name.Name)
-			}
+	cfg, _ := env.Load()
+	modulePath := "github.com/mmycin/goforge"
+	if cfg != nil && cfg.Module != "" {
+		modulePath = cfg.Module
+	}
+
+	steps := []string{
+		"Writing service.go", "Writing handler.go", "Writing model.go",
+		"Writing routes.go", "Writing docs.go", "Writing grpc.go",
+		"Writing proto file", "Updating kernel.go",
+	}
+	pm := progress.New(fmt.Sprintf("Scaffolding service '%s'", name), steps)
+	progressCh := make(chan any, 64)
+
+	// Collect generated files while draining the channel in the runner.
+	// Use a pointer so the progress runner closure can write to it safely
+	// (the runner runs on the tea goroutine, the use-case on a separate goroutine,
+	// but the files pointer is only written from UseCaseDone which happens before
+	// channel close — so reading after p.Run() is safe).
+	var finalFiles []usecase.GeneratedFile
+	var runErr error
+
+	go func() {
+		runErr = d.GenService.Run(name, modulePath, progressCh)
+		close(progressCh)
+	}()
+
+	runner := newCollectingProgressRunner(pm, progressCh, &finalFiles)
+	prog := tea.NewProgram(runner, tea.WithAltScreen())
+	if _, err := prog.Run(); err != nil {
+		return err
+	}
+
+	if runErr != nil {
+		tui.Error("gen:service failed: %v", runErr)
+		return runErr
+	}
+
+	nextStep := fmt.Sprintf("goforge gen:migration add_%s_table", name)
+	rm := result.New(fmt.Sprintf("Service '%s' scaffolded", name), finalFiles, nextStep)
+	rp := tea.NewProgram(rm, tea.WithAltScreen())
+	_, err := rp.Run()
+	return err
+}
+
+// collectingProgressRunner is like progressRunner but captures GeneratedFiles
+// from UseCaseDone into the provided pointer.
+type collectingProgressRunner struct {
+	progressRunner
+	files *[]usecase.GeneratedFile
+}
+
+func newCollectingProgressRunner(pm progress.Model, ch <-chan any, files *[]usecase.GeneratedFile) collectingProgressRunner {
+	return collectingProgressRunner{
+		progressRunner: newProgressRunner(pm, ch),
+		files:          files,
+	}
+}
+
+func (r collectingProgressRunner) Init() tea.Cmd {
+	return r.progressRunner.Init()
+}
+
+func (r collectingProgressRunner) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Intercept UseCaseDone to capture files before forwarding.
+	if tick, ok := msg.(progressTickMsg); ok {
+		if done, ok := tick.event.(usecase.UseCaseDone); ok {
+			*r.files = done.Files
 		}
 	}
-	return models, nil
+	updated, cmd := r.progressRunner.Update(msg)
+	// Re-wrap so our type is preserved in the final model.
+	if pr, ok := updated.(progressRunner); ok {
+		r.progressRunner = pr
+	}
+	return r, cmd
+}
+
+func (r collectingProgressRunner) View() string {
+	return r.progressRunner.View()
 }

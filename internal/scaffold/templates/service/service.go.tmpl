@@ -1,0 +1,20 @@
+package {{.PackageName}}
+
+import (
+	"context"
+
+	"{{.ModulePath}}/core/database"
+)
+
+// {{.TypeName}}Service holds business logic for the {{.PackageName}} domain.
+type {{.TypeName}}Service struct {
+	db *database.Database
+}
+
+// New{{.TypeName}}Service creates a new {{.TypeName}}Service.
+func New{{.TypeName}}Service(db *database.Database) *{{.TypeName}}Service {
+	return &{{.TypeName}}Service{db: db}
+}
+
+// Ensure the context import is used — remove this line when adding real methods.
+var _ context.Context

@@ -1,0 +1,24 @@
+package {{.PackageName}}
+
+// Topic constants for {{.PackageName}} domain events.
+// Use these when registering listeners and dispatching events.
+const (
+	Event{{.TypeName}}Created = "{{.PackageName}}.created"
+	Event{{.TypeName}}Updated = "{{.PackageName}}.updated"
+	Event{{.TypeName}}Deleted = "{{.PackageName}}.deleted"
+)
+
+// {{.TypeName}}Created is fired after a {{.PackageName}} record is successfully created.
+type {{.TypeName}}Created struct {
+	ID uint
+}
+
+// {{.TypeName}}Updated is fired after a {{.PackageName}} record is updated.
+type {{.TypeName}}Updated struct {
+	ID uint
+}
+
+// {{.TypeName}}Deleted is fired after a {{.PackageName}} record is deleted.
+type {{.TypeName}}Deleted struct {
+	ID uint
+}

@@ -1,64 +1,70 @@
 package cmd
 
 import (
-	"os"
-	"path/filepath"
+	"fmt"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/mmycin/GoForge/internal/env"
+	"github.com/mmycin/GoForge/internal/tui"
+	"github.com/mmycin/GoForge/internal/tui/confirm"
+	"github.com/mmycin/GoForge/internal/tui/progress"
 	"github.com/spf13/cobra"
 )
 
-func init() {
-	rootCmd.AddCommand(removeServiceCmd)
+func newRemServiceCmd(d *Deps) *cobra.Command {
+	return &cobra.Command{
+		Use:   "rem:service [name]",
+		Short: "Permanently remove a service",
+		Long:  `Remove a service directory, its proto files, and its kernel.go registration.`,
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRemService(d, args[0])
+		},
+	}
 }
 
-var removeServiceCmd = &cobra.Command{
-	Use:   "rem:service [name]",
-	Short: "Remove an existing service",
-	Long:  `Permanently remove a service, including its directory, proto files, and kernel registration.`,
-	Args:  cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
-		name := args[0]
-		Info("Removing service: %s", name)
-		removeService(name)
-	},
-}
+func runRemService(d *Deps, name string) error {
+	body := fmt.Sprintf(
+		"You are about to permanently remove:\n\n"+
+			"  • internal/services/%s/  (all files)\n"+
+			"  • internal/proto/%s/     (all files)\n"+
+			"  • Registration in internal/services/kernel.go\n\n"+
+			"This cannot be undone.",
+		name, name,
+	)
 
-func removeService(name string) {
-	servicesDir := filepath.Join("internal/services", name)
-	protoDir := filepath.Join("internal/proto", name)
-
-	// Check if service exists
-	if _, err := os.Stat(servicesDir); os.IsNotExist(err) {
-		ErrorLog("Service '%s' does not exist", name)
-		os.Exit(1)
+	cm := confirm.New("Remove Service  "+name, body, true)
+	cp := tea.NewProgram(cm, tea.WithAltScreen())
+	finalModel, err := cp.Run()
+	if err != nil {
+		return err
+	}
+	fm, ok := finalModel.(confirm.Model)
+	if !ok || !fm.Confirmed() {
+		tui.Info("Cancelled — service was not removed.")
+		return nil
 	}
 
-	// Remove internal/services/<name>
-	if err := os.RemoveAll(servicesDir); err != nil {
-		ErrorLog("Failed to remove service directory: %v", err)
-		os.Exit(1)
+	cfg, _ := env.Load()
+	modulePath := "github.com/mmycin/goforge"
+	if cfg != nil && cfg.Module != "" {
+		modulePath = cfg.Module
 	}
 
-	// Remove proto/<name>
-	if err := os.RemoveAll(protoDir); err != nil {
-		ErrorLog("Failed to remove proto directory: %v", err)
+	steps := []string{
+		fmt.Sprintf("Removing internal/services/%s", name),
+		fmt.Sprintf("Removing internal/proto/%s", name),
+		"Updating kernel.go",
 	}
+	pm := progress.New(fmt.Sprintf("Removing service '%s'", name), steps)
+	progressCh := make(chan any, 32)
 
-	// Remove from kernel
-	removeFromKernel(name)
+	go func() {
+		_ = d.RemService.Run(name, modulePath, progressCh)
+		close(progressCh)
+	}()
 
-	Success("Service '%s' removed successfully", name)
-}
-
-func removeFromKernel(name string) {
-	cfg, err := env.Load()
-	moduleName := "github.com/mmycin/goforge"
-	if err == nil && cfg.Module != "" {
-		moduleName = cfg.Module
-	}
-
-	if err := registerModels(moduleName); err != nil {
-		Warning("Could not automatically update kernel.go: %v", err)
-	}
+	prog := tea.NewProgram(newProgressRunner(pm, progressCh), tea.WithAltScreen())
+	_, err = prog.Run()
+	return err
 }

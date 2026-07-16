@@ -2,669 +2,420 @@ package cmd
 
 import (
 	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 
-	"github.com/mmycin/GoForge/internal/env"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/mmycin/GoForge/internal/tui"
+	"github.com/mmycin/GoForge/internal/tui/confirm"
+	"github.com/mmycin/GoForge/internal/tui/progress"
+	"github.com/mmycin/GoForge/internal/tui/viewport"
+	"github.com/mmycin/GoForge/internal/usecase"
 	"github.com/spf13/cobra"
 )
 
-// atlasConfigURI is the Atlas --config value.
-// Atlas requires the file:// scheme regardless of OS.
-const atlasConfigURI = "file://core/database/atlas.hcl"
+// ── migrate ───────────────────────────────────────────────────────────────────
 
-// sqlcConfig is the sqlc --file value pointing to the config moved to core/database/.
-const sqlcConfig = "core/database/sqlc.yaml"
-
-func init() {
-	rootCmd.AddCommand(migrateCmd)
-	rootCmd.AddCommand(genMigrationCmd)
-	rootCmd.AddCommand(remMigrationCmd)
-	rootCmd.AddCommand(loaderCmd)
-	rootCmd.AddCommand(genSqlcCmd)
-	rootCmd.AddCommand(remSqlcCmd)
-}
-
-var migrateCmd = &cobra.Command{
-	Use:   "migrate",
-	Short: "Run database migrations",
-	Long:  `Execute migrations to synchronize database schema with models.`,
-	Run: func(cmd *cobra.Command, args []string) {
-		Info("Running database migration...")
-		migrateDB()
-	},
-}
-
-var genMigrationCmd = &cobra.Command{
-	Use:   "gen:migration [name]",
-	Short: "Create a new database migration",
-	Long:  `Generate a new database migration file with the specified name.`,
-	Args:  cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
-		name := args[0]
-		Info("Creating migration: %s", name)
-		genMigration(name)
-	},
-}
-
-var remMigrationCmd = &cobra.Command{
-	Use:   "rem:migration",
-	Short: "Remove the latest database migration",
-	Long:  `Delete the most recent migration file and revert the atlas hash.`,
-	Run: func(cmd *cobra.Command, args []string) {
-		Info("Removing latest migration...")
-		remMigration()
-	},
-}
-
-var loaderCmd = &cobra.Command{
-	Use:   "loader",
-	Short: "Run GORM schema loader",
-	Long:  `Load and display GORM schema definitions.`,
-	Run: func(cmd *cobra.Command, args []string) {
-		runLoader()
-	},
-}
-
-var genSqlcCmd = &cobra.Command{
-	Use:   "gen:sqlc",
-	Short: "Run SQLC code generation",
-	Long:  `Execute sqlc generate to create database query code.`,
-	Run: func(cmd *cobra.Command, args []string) {
-		Info("Running code generation...")
-		genSqlc()
-	},
-}
-
-var remSqlcCmd = &cobra.Command{
-	Use:   "rem:sqlc",
-	Short: "Remove SQLC integration",
-	Long:  `Remove generated SQLC code and revert database kernel integration.`,
-	Run: func(cmd *cobra.Command, args []string) {
-		Info("Removing SQLC integration...")
-		removeSqlc("core/database/database.go")
-	},
-}
-
-func genSqlc() {
-	if err := updateSqlcConfig(); err != nil {
-		Warning("Failed to update sqlc.yaml: %v", err)
+func newMigrateCmd(d *Deps) *cobra.Command {
+	return &cobra.Command{
+		Use:   "migrate",
+		Short: "Apply pending database migrations",
+		Long:  `Execute pending migrations to synchronise the database schema with your models.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runMigrate(d)
+		},
 	}
-
-	cfg, _ := env.Load()
-	engine := "sqlite"
-	if cfg != nil && cfg.DBConnection != "" {
-		engine = cfg.DBConnection
-	}
-
-	if engine == "postgres" || engine == "postgresql" {
-		engine = "postgresql"
-	} else if engine == "mysql" {
-		engine = "mysql"
-	} else {
-		engine = "sqlite"
-	}
-
-	Info("Transforming queries for %s engine...", engine)
-	if err := transformQueries(engine); err != nil {
-		Warning("Failed to transform queries: %v", err)
-	}
-
-	Info("Executing sqlc generate...")
-	cmd := exec.Command("sqlc", "generate", "--file", sqlcConfig)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		ErrorLog("sqlc generate failed: %v", err)
-		os.Exit(1)
-	}
-	Success("Code generation completed successfully")
-
-	injectSqlc("core/database/database.go")
 }
 
-func transformQueries(engine string) error {
-	queriesDir := "internal/database/queries"
-	files, err := filepath.Glob(filepath.Join(queriesDir, "*.sql"))
+func runMigrate(d *Deps) error {
+	info := d.Migrate.Detect()
+
+	body := fmt.Sprintf(
+		"Migrator    %s\nConnection  %s\nDatabase    %s",
+		info.Migrator, info.Connection,
+		formatDBLabel(info.DBName, info.DBHost, info.DBPort),
+	)
+
+	cm := confirm.New("Run Database Migrations", body, false)
+	cp := tea.NewProgram(cm, tea.WithAltScreen())
+	finalModel, err := cp.Run()
 	if err != nil {
 		return err
 	}
+	fm, ok := finalModel.(confirm.Model)
+	if !ok || !fm.Confirmed() {
+		tui.Info("Cancelled.")
+		return nil
+	}
 
-	for _, f := range files {
-		content, err := os.ReadFile(f)
+	return runWithViewport(d, "Migration Output", func(ch chan<- any) error {
+		return d.Migrate.Run(ch)
+	})
+}
+
+// ── gen:migration ─────────────────────────────────────────────────────────────
+
+func newGenMigrationCmd(d *Deps) *cobra.Command {
+	return &cobra.Command{
+		Use:   "gen:migration [name]",
+		Short: "Create a new migration file",
+		Long:  `Generate a new Atlas migration file for the current model state.`,
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name := ""
+			if len(args) == 1 {
+				name = args[0]
+			}
+			return runGenMigration(d, name)
+		},
+	}
+}
+
+func runGenMigration(d *Deps, name string) error {
+	if name == "" {
+		var err error
+		name, err = promptInput(
+			"Migration Name",
+			"Describe what this migration does, in snake_case.",
+			"add_users_table",
+		)
 		if err != nil {
 			return err
 		}
-
-		newContent := string(content)
-		if engine == "postgresql" {
-			lines := strings.Split(newContent, "\n")
-			placeholderIdx := 1
-			for i, line := range lines {
-				if strings.Contains(line, "-- name:") {
-					placeholderIdx = 1
-				}
-				for strings.Contains(lines[i], "?") {
-					lines[i] = strings.Replace(lines[i], "?", fmt.Sprintf("$%d", placeholderIdx), 1)
-					placeholderIdx++
-				}
-			}
-			newContent = strings.Join(lines, "\n")
-		} else if engine == "mysql" || engine == "sqlite" {
-			for i := 1; i < 50; i++ {
-				newContent = strings.ReplaceAll(newContent, fmt.Sprintf("$%d", i), "?")
-			}
-		}
-
-		if err := os.WriteFile(f, []byte(newContent), 0644); err != nil {
-			return err
+		if name == "" {
+			tui.Info("Cancelled.")
+			return nil
 		}
 	}
-	return nil
+
+	return runWithViewport(d, fmt.Sprintf("Creating migration: %s", name), func(ch chan<- any) error {
+		return d.GenMigration.Run(name, ch)
+	})
 }
 
-func updateSqlcConfig() error {
-	configPath := "core/database/sqlc.yaml"
-	content, err := os.ReadFile(configPath)
+// ── rem:migration ─────────────────────────────────────────────────────────────
+
+func newRemMigrationCmd(d *Deps) *cobra.Command {
+	return &cobra.Command{
+		Use:   "rem:migration",
+		Short: "Remove the latest migration file",
+		Long:  `Delete the most recent migration file and rehash the Atlas migration directory.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRemMigration(d)
+		},
+	}
+}
+
+func runRemMigration(d *Deps) error {
+	body := "This will delete the latest .sql file in internal/database/migrations/ and update the atlas hash."
+	cm := confirm.New("Remove Latest Migration", body, true)
+	cp := tea.NewProgram(cm, tea.WithAltScreen())
+	finalModel, err := cp.Run()
 	if err != nil {
 		return err
 	}
-
-	cfg, _ := env.Load()
-	engine := "sqlite"
-	if cfg != nil && cfg.DBConnection != "" {
-		engine = cfg.DBConnection
+	fm, ok := finalModel.(confirm.Model)
+	if !ok || !fm.Confirmed() {
+		tui.Info("Cancelled.")
+		return nil
 	}
 
-	if engine == "postgres" {
-		engine = "postgresql"
+	progressCh := make(chan any, 32)
+	steps := []string{"Deleting latest migration", "Updating atlas hash"}
+	pm := progress.New("Removing latest migration", steps)
+
+	var runErr error
+	go func() {
+		runErr = d.RemMigration.Run(progressCh)
+		close(progressCh)
+	}()
+
+	prog := tea.NewProgram(newProgressRunner(pm, progressCh), tea.WithAltScreen())
+	if _, err := prog.Run(); err != nil {
+		return err
+	}
+	if runErr != nil {
+		tui.Error("rem:migration failed: %v", runErr)
+	}
+	return runErr
+}
+
+// ── gen:sqlc ──────────────────────────────────────────────────────────────────
+
+func newGenSqlcCmd(d *Deps) *cobra.Command {
+	return &cobra.Command{
+		Use:   "gen:sqlc",
+		Short: "Generate type-safe SQL query code",
+		Long:  `Run sqlc generate and inject the Sqlc field into database.go.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runGenSqlc(d)
+		},
+	}
+}
+
+func runGenSqlc(d *Deps) error {
+	info := d.GenSqlc.Detect()
+	body := fmt.Sprintf(
+		"Engine    %s  (detected from .env)\nConfig    %s\nOutput    %s\n\n"+
+			"This will run sqlc generate and inject the Sqlc field into database.go.",
+		info.Engine, info.Config, info.Output,
+	)
+
+	cm := confirm.New("Generate SQLC Bindings", body, false)
+	cp := tea.NewProgram(cm, tea.WithAltScreen())
+	finalModel, err := cp.Run()
+	if err != nil {
+		return err
+	}
+	fm, ok := finalModel.(confirm.Model)
+	if !ok || !fm.Confirmed() {
+		tui.Info("Cancelled.")
+		return nil
 	}
 
-	lines := strings.Split(string(content), "\n")
-	updated := false
-	for i, line := range lines {
-		if strings.Contains(line, "engine:") {
-			parts := strings.SplitN(line, "engine:", 2)
-			if len(parts) == 2 {
-				indent := parts[0]
-				suffix := ""
-				if idx := strings.Index(parts[1], "#"); idx != -1 {
-					suffix = " " + parts[1][idx:]
-				}
-				lines[i] = fmt.Sprintf("%sengine: %q%s", indent, engine, suffix)
-				updated = true
-				break
+	return runWithViewport(d, "SQLC Code Generation", func(ch chan<- any) error {
+		return d.GenSqlc.Run(ch)
+	})
+}
+
+// ── rem:sqlc ──────────────────────────────────────────────────────────────────
+
+func newRemSqlcCmd(d *Deps) *cobra.Command {
+	return &cobra.Command{
+		Use:   "rem:sqlc",
+		Short: "Remove generated SQLC integration",
+		Long:  `Remove the Sqlc field from database.go and delete core/database/gen/.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRemSqlc(d)
+		},
+	}
+}
+
+func runRemSqlc(d *Deps) error {
+	body := "This will:\n  • Remove the Sqlc field from core/database/database.go\n  • Delete core/database/gen/\n\nThis cannot be undone."
+	cm := confirm.New("Remove SQLC Integration", body, true)
+	cp := tea.NewProgram(cm, tea.WithAltScreen())
+	finalModel, err := cp.Run()
+	if err != nil {
+		return err
+	}
+	fm, ok := finalModel.(confirm.Model)
+	if !ok || !fm.Confirmed() {
+		tui.Info("Cancelled.")
+		return nil
+	}
+
+	steps := []string{"Reverting database.go", "Deleting core/database/gen/"}
+	pm := progress.New("Removing SQLC Integration", steps)
+	progressCh := make(chan any, 16)
+	var runErr error
+
+	go func() {
+		runErr = d.RemSqlc.Run(progressCh)
+		close(progressCh)
+	}()
+
+	prog := tea.NewProgram(newProgressRunner(pm, progressCh), tea.WithAltScreen())
+	if _, err := prog.Run(); err != nil {
+		return err
+	}
+	if runErr != nil {
+		tui.Error("rem:sqlc failed: %v", runErr)
+	}
+	return runErr
+}
+
+// ── loader ────────────────────────────────────────────────────────────────────
+
+func newLoaderCmd(d *Deps) *cobra.Command {
+	return &cobra.Command{
+		Use:   "loader",
+		Short: "Inspect GORM schema output",
+		Long:  `Run a temporary Go program that loads GORM models and prints the SQL schema.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runLoader(d)
+		},
+	}
+}
+
+func runLoader(d *Deps) error {
+	return runWithViewport(d, "GORM Schema Loader", func(ch chan<- any) error {
+		return runLoaderUseCase(d, ch)
+	})
+}
+
+// runLoaderUseCase executes the temporary loader and streams its output.
+func runLoaderUseCase(d *Deps, progress usecase.Progress) error {
+	from, _ := d.FS.ReadFile("go.mod")
+	modulePath := "github.com/mmycin/goforge"
+	for _, line := range strings.Split(string(from), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "module ") {
+			modulePath = strings.TrimPrefix(line, "module ")
+			break
+		}
+	}
+
+	dbConn := "sqlite"
+	if envData, _ := d.FS.ReadFile(".env"); envData != nil {
+		for _, l := range strings.Split(string(envData), "\n") {
+			if strings.HasPrefix(l, "DB_CONNECTION=") {
+				dbConn = strings.TrimPrefix(l, "DB_CONNECTION=")
 			}
 		}
 	}
 
-	if !updated {
-		return fmt.Errorf("could not find 'engine' field in %s", configPath)
-	}
-
-	return os.WriteFile(configPath, []byte(strings.Join(lines, "\n")), 0644)
-}
-
-func injectSqlc(targetPath string) {
-	content, err := os.ReadFile(targetPath)
-	if err != nil {
-		Warning("Could not read %s for injection: %v", targetPath, err)
-		return
-	}
-
-	code := string(content)
-	if strings.Contains(code, "sqlc.New(sqlDB)") {
-		return
-	}
-
-	Info("Injecting SQLC support into database...")
-
-	cfg, _ := env.Load()
-	moduleName := "github.com/mmycin/goforge"
-	if cfg != nil && cfg.Module != "" {
-		moduleName = cfg.Module
-	}
-
-	lines := strings.Split(code, "\n")
-	var newLines []string
-
-	importAdded := false
-	fieldAdded := false
-	sqlDBAdded := false
-	literalUpdated := false
-
-	for i := 0; i < len(lines); i++ {
-		line := lines[i]
-		trimmed := strings.TrimSpace(line)
-
-		if !importAdded && strings.Contains(line, "core/config") {
-			newLines = append(newLines, line)
-			newLines = append(newLines, fmt.Sprintf("\tsqlc \"%s/core/database/gen\"", moduleName))
-			importAdded = true
-			continue
-		}
-
-		if !fieldAdded && trimmed == "Gorm *gorm.DB" {
-			newLines = append(newLines, line)
-			newLines = append(newLines, "\tSqlc *sqlc.Queries")
-			fieldAdded = true
-			continue
-		}
-
-		if !sqlDBAdded && trimmed == "if err != nil {" && i > 0 && strings.Contains(lines[i-1], "gorm.Open") {
-			newLines = append(newLines, line)
-			newLines = append(newLines, lines[i+1])
-			newLines = append(newLines, lines[i+2])
-			i += 2
-
-			newLines = append(newLines, "")
-			newLines = append(newLines, "\tsqlDB, err := gormDB.DB()")
-			newLines = append(newLines, "\tif err != nil {")
-			newLines = append(newLines, "\t\treturn err")
-			newLines = append(newLines, "\t}")
-			sqlDBAdded = true
-			continue
-		}
-
-		if !literalUpdated && trimmed == "Gorm: gormDB," {
-			newLines = append(newLines, line)
-			newLines = append(newLines, "\t\tSqlc: sqlc.New(sqlDB),")
-			literalUpdated = true
-			continue
-		}
-
-		newLines = append(newLines, line)
-	}
-
-	code = strings.Join(newLines, "\n")
-	if err := os.WriteFile(targetPath, []byte(code), 0644); err != nil {
-		Warning("Failed to inject SQLC support: %v", err)
-	}
-	Success("SQLC support injected into database")
-}
-
-func removeSqlc(targetPath string) {
-	content, err := os.ReadFile(targetPath)
-	if err != nil {
-		Warning("Could not read %s for removal: %v", targetPath, err)
-		return
-	}
-
-	code := string(content)
-	lines := strings.Split(code, "\n")
-	var newLines []string
-
-	for i := 0; i < len(lines); i++ {
-		line := lines[i]
-		trimmed := strings.TrimSpace(line)
-
-		if strings.Contains(line, "core/database/gen") {
-			continue
-		}
-
-		if trimmed == "Sqlc *sqlc.Queries" {
-			newLines = append(newLines, "\t// Sqlc field will be added when generated code is available")
-			continue
-		}
-
-		if trimmed == "sqlDB, err := gormDB.DB()" {
-			i += 3
-			if i+1 < len(lines) && strings.TrimSpace(lines[i+1]) == "" {
-				i++
-			}
-			continue
-		}
-
-		if strings.Contains(line, "Sqlc: sqlc.New(sqlDB),") {
-			continue
-		}
-
-		newLines = append(newLines, line)
-	}
-
-	code = strings.Join(newLines, "\n")
-	if err := os.WriteFile(targetPath, []byte(code), 0644); err != nil {
-		Warning("Failed to remove SQLC support: %v", err)
-	}
-
-	genDir := "core/database/gen"
-	if _, err := os.Stat(genDir); err == nil {
-		Info("Deleting generated folder: %s", genDir)
-		os.RemoveAll(genDir)
-	}
-
-	Success("SQLC support removed from database")
-}
-
-func remMigration() {
-	cfg, err := env.Load()
-	if err != nil {
-		Warning("Could not load environment: %v", err)
-	}
-
-	migrationDir := "internal/database/migrations"
-	files, err := filepath.Glob(filepath.Join(migrationDir, "*.sql"))
-	if err != nil || len(files) == 0 {
-		Info("No migration files found to remove.")
-		return
-	}
-
-	latest := files[len(files)-1]
-	Info("Deleting migration file: %s", latest)
-	if err := os.Remove(latest); err != nil {
-		ErrorLog("Failed to delete migration file: %v", err)
-		return
-	}
-
-	Info("Updating atlas migrate hash...")
-
-	dbConn := "sqlite"
-	if cfg != nil && cfg.DBConnection != "" {
-		dbConn = cfg.DBConnection
-	}
-
-	atlasEnv := os.Environ()
-	atlasEnv = append(atlasEnv, "DB_CONNECTION="+dbConn)
-	cmd := exec.Command("atlas", "migrate", "hash", "--env", "gorm", "--config", atlasConfigURI)
-	cmd.Env = atlasEnv
-	if err := cmd.Run(); err != nil {
-		Warning("Atlas hash update failed: %v", err)
-	}
-
-	Success("Latest migration removed successfully")
-}
-
-func genMigration(name string) {
-	cfg, err := env.Load()
-	if err != nil {
-		Warning("Could not load environment: %v", err)
-	}
-
-	dbConn := "sqlite"
-	dbName := ""
-	dbUser := ""
-	dbPass := ""
-	dbHost := ""
-	dbPort := "3306"
-	dbDevName := ""
-
-	if cfg != nil {
-		if cfg.DBConnection != "" {
-			dbConn = cfg.DBConnection
-		}
-		if cfg.DBName != "" {
-			dbName = cfg.DBName
-		}
-		if cfg.DBUsername != "" {
-			dbUser = cfg.DBUsername
-		}
-		if cfg.DBPassword != "" {
-			dbPass = cfg.DBPassword
-		}
-		if cfg.DBHost != "" {
-			dbHost = cfg.DBHost
-		}
-		if cfg.DBPort != "" {
-			dbPort = cfg.DBPort
-		}
-		if cfg.DBDevName != "" {
-			dbDevName = cfg.DBDevName
-		}
-	}
-
-	atlasEnv := os.Environ()
-
-	atlasEnv = append(atlasEnv, "DB_CONNECTION="+dbConn)
-	atlasEnv = append(atlasEnv, "DB_NAME="+dbName)
-	atlasEnv = append(atlasEnv, "DB_USERNAME="+dbUser)
-	atlasEnv = append(atlasEnv, "DB_PASSWORD="+dbPass)
-	atlasEnv = append(atlasEnv, "DB_HOST="+dbHost)
-	atlasEnv = append(atlasEnv, "DB_PORT="+dbPort)
-	atlasEnv = append(atlasEnv, "DB_DEV_NAME="+dbDevName)
-
-	Info("Running atlas migrate diff...")
-	cmd := exec.Command("atlas", "migrate", "diff", "--env", "gorm", "--config", atlasConfigURI, name)
-	cmd.Env = atlasEnv
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		fmt.Printf("\n")
-		ErrorLog("Atlas migration failed: %v", err)
-		if dbDevName == "" && (dbConn == "mysql" || dbConn == "postgres") {
-			fmt.Println("\nTIP: Atlas requires a clean/empty database for the 'dev' environment.")
-			fmt.Printf("1. Create an empty database in your %s server (e.g., 'CREATE DATABASE %s_dev;')\n", dbConn, dbName)
-			fmt.Printf("2. Add 'DB_DEV_NAME=%s_dev' to your .env file\n", dbName)
-			fmt.Println("3. Run the command again.")
-		}
-		os.Exit(1)
-	}
-
-	Info("Cleaning up SQL files...")
-	files, _ := filepath.Glob("internal/database/migrations/*.sql")
-	for _, f := range files {
-		content, err := os.ReadFile(f)
-		if err != nil {
-			Warning("Failed to read %s: %v", f, err)
-			continue
-		}
-		newContent := string(content)
-		newContent = strings.ReplaceAll(newContent, "`", "")
-
-		lines := strings.Split(newContent, "\n")
-		for i, line := range lines {
-			if idx := strings.Index(line, "COLLATE"); idx != -1 {
-				lines[i] = strings.TrimSpace(line[:idx])
-				if strings.HasSuffix(lines[i], ";") {
-				} else {
-					lines[i] += ";"
-				}
-			}
-		}
-		newContent = strings.Join(lines, "\n")
-
-		if err := os.WriteFile(f, []byte(newContent), 0644); err != nil {
-			Warning("Failed to write %s: %v", f, err)
-		}
-	}
-
-	Info("Running atlas migrate hash...")
-	cmd = exec.Command("atlas", "migrate", "hash", "--env", "gorm", "--config", atlasConfigURI)
-	cmd.Env = atlasEnv
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		ErrorLog("Atlas hash failed: %v", err)
-		os.Exit(1)
-	}
-
-	Success("Migration created successfully")
-}
-
-func runLoader() {
-	cfg, _ := env.Load()
-	moduleName := "github.com/mmycin/goforge"
-	dbConn := "sqlite"
-	if cfg != nil {
-		if cfg.Module != "" {
-			moduleName = cfg.Module
-		}
-		if cfg.DBConnection != "" {
-			dbConn = cfg.DBConnection
-		}
-	}
-
-	Info("Preparing temporary GORM schema loader...")
-
-	loaderSource := fmt.Sprintf(`package main
-
+	src := fmt.Sprintf(`package main
 import (
 	"fmt"
 	"os"
-
 	"ariga.io/atlas-provider-gorm/gormschema"
 	"%s/internal/services"
 )
-
 func main() {
-	models := services.Model()
 	loader := gormschema.New("%s")
-	stmts, err := loader.Load(models...)
+	stmts, err := loader.Load(services.Model()...)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: Failed to load GORM schema: %%v\n", err)
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	fmt.Fprintln(os.Stdout, stmts)
+	fmt.Println(stmts)
+}`, modulePath, dbConn)
+
+	tmp := "goforge_tmp_loader.go"
+	if err := d.FS.WriteFile(tmp, []byte(src), 0644); err != nil {
+		return err
+	}
+	defer d.FS.Remove(tmp)
+
+	usecase.SendLog(progress, "info", "Running GORM schema loader…")
+
+	out, err := d.Exec.RunWithOutput("go", "run", tmp)
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.TrimSpace(line) != "" {
+			usecase.SendLog(progress, "info", line)
+		}
+	}
+	usecase.SendDone(progress)
+	return err
 }
-`, moduleName, dbConn)
 
-	tmpFile := "goforge_tmp_loader.go"
-	if err := os.WriteFile(tmpFile, []byte(loaderSource), 0644); err != nil {
-		ErrorLog("Failed to create temporary loader file: %v", err)
-		os.Exit(1)
+// ── shared viewport runner ────────────────────────────────────────────────────
+
+// runWithViewport runs a use-case that streams events and displays them in a
+// live-output viewport. The viewport exits cleanly on completion or error.
+func runWithViewport(_ *Deps, title string, run func(chan<- any) error) error {
+	progressCh := make(chan any, 128)
+	var runErr error
+
+	go func() {
+		runErr = run(progressCh)
+		close(progressCh)
+	}()
+
+	vp := viewport.New(title, 80, 30)
+	prog := tea.NewProgram(newViewportRunner(vp, progressCh), tea.WithAltScreen())
+	if _, err := prog.Run(); err != nil {
+		return err
 	}
-	defer os.Remove(tmpFile)
+	return runErr
+}
 
-	cmd := exec.Command("go", "run", tmpFile)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		ErrorLog("Failed to execute loader: %v", err)
-		os.Exit(1)
+func formatDBLabel(dbName, host, port string) string {
+	if dbName == "" {
+		return "(sqlite)"
+	}
+	label := dbName
+	if host != "" {
+		label += fmt.Sprintf("  (host: %s", host)
+		if port != "" {
+			label += ":" + port
+		}
+		label += ")"
+	}
+	return label
+}
+
+// ── viewport runner model ─────────────────────────────────────────────────────
+
+type viewportRunner struct {
+	vp         viewport.Model
+	progressCh <-chan any
+	done       bool
+}
+
+func newViewportRunner(vp viewport.Model, ch <-chan any) viewportRunner {
+	return viewportRunner{vp: vp, progressCh: ch}
+}
+
+type vpTickMsg struct{ event any }
+type vpDoneMsg struct{ err error }
+
+func (r viewportRunner) Init() tea.Cmd {
+	return tea.Batch(r.vp.Init(), r.waitNext())
+}
+
+func (r viewportRunner) waitNext() tea.Cmd {
+	return func() tea.Msg {
+		e, ok := <-r.progressCh
+		if !ok {
+			// Channel closed — subprocess finished (successfully or with error).
+			return vpDoneMsg{}
+		}
+		return vpTickMsg{event: e}
 	}
 }
 
-func migrateDB() {
-	cfg, err := env.Load()
-	if err != nil {
-		Warning("Could not load environment: %v", err)
+func (r viewportRunner) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case vpTickMsg:
+		var cmd tea.Cmd
+		switch e := msg.event.(type) {
+		case usecase.LogLine:
+			r.vp, cmd = viewport.UpdateModel(r.vp, viewport.AppendLineMsg{Line: e.Text})
+		case usecase.StepStarted:
+			r.vp, cmd = viewport.UpdateModel(r.vp, viewport.AppendLineMsg{Line: tui.MutedStyle.Render("→  " + e.Label + "…")})
+		case usecase.StepDone:
+			r.vp, cmd = viewport.UpdateModel(r.vp, viewport.AppendLineMsg{Line: tui.SuccessStyle.Render("✓  "+e.Label)})
+		case usecase.StepFailed:
+			errMsg := e.Label
+			if e.Err != nil {
+				errMsg += ": " + e.Err.Error()
+			}
+			r.vp, cmd = viewport.UpdateModel(r.vp, viewport.AppendLineMsg{Line: tui.ErrorStyle.Render("✗  " + errMsg)})
+			r.vp, _ = viewport.UpdateModel(r.vp, viewport.DoneMsg{Err: e.Err})
+			r.done = true
+			return r, tea.Batch(cmd, r.waitNext())
+		case usecase.UseCaseDone:
+			r.vp, cmd = viewport.UpdateModel(r.vp, viewport.DoneMsg{})
+			r.done = true
+			return r, cmd
+		}
+		return r, tea.Batch(cmd, r.waitNext())
+
+	case vpDoneMsg:
+		r.vp, _ = viewport.UpdateModel(r.vp, viewport.DoneMsg{Err: msg.err})
+		r.done = true
+		return r, nil
+
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "ctrl+c":
+			return r, tea.Quit
+		case "enter", "q", "esc":
+			if r.done {
+				return r, tea.Quit
+			}
+		}
+		var cmd tea.Cmd
+		r.vp, cmd = viewport.UpdateModel(r.vp, msg)
+		return r, cmd
+
+	case tea.WindowSizeMsg:
+		var cmd tea.Cmd
+		r.vp, cmd = viewport.UpdateModel(r.vp, msg)
+		return r, cmd
 	}
-
-	migrator := "atlas"
-	if cfg != nil && cfg.DBMigrator != "" {
-		migrator = cfg.DBMigrator
-	}
-	Info("Detected migrator: %s", migrator)
-
-	if migrator == "gorm" {
-		// First try to run the local migrate command if it exists in the template
-		cmd := exec.Command("go", "run", "app/main.go", "migrate")
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err == nil {
-			Success("GORM migration completed via app command")
-			return
-		}
-
-		// Fallback to temporary runner if local command fails
-		runGormMigrate()
-		return
-	}
-
-	Info("Running Atlas migrate apply...")
-
-	dbConn := "sqlite"
-	dbName := ""
-	dbUser := ""
-	dbPass := ""
-	dbHost := ""
-	dbPort := "3306"
-	dbDevName := ""
-
-	if cfg != nil {
-		if cfg.DBConnection != "" {
-			dbConn = cfg.DBConnection
-		}
-		if cfg.DBName != "" {
-			dbName = cfg.DBName
-		}
-		if cfg.DBUsername != "" {
-			dbUser = cfg.DBUsername
-		}
-		if cfg.DBPassword != "" {
-			dbPass = cfg.DBPassword
-		}
-		if cfg.DBHost != "" {
-			dbHost = cfg.DBHost
-		}
-		if cfg.DBPort != "" {
-			dbPort = cfg.DBPort
-		}
-		if cfg.DBDevName != "" {
-			dbDevName = cfg.DBDevName
-		}
-	}
-
-	atlasEnv := os.Environ()
-
-	atlasEnv = append(atlasEnv, "DB_CONNECTION="+dbConn)
-	atlasEnv = append(atlasEnv, "DB_NAME="+dbName)
-	atlasEnv = append(atlasEnv, "DB_USERNAME="+dbUser)
-	atlasEnv = append(atlasEnv, "DB_PASSWORD="+dbPass)
-	atlasEnv = append(atlasEnv, "DB_HOST="+dbHost)
-	atlasEnv = append(atlasEnv, "DB_PORT="+dbPort)
-	atlasEnv = append(atlasEnv, "DB_DEV_NAME="+dbDevName)
-
-	cmd := exec.Command("atlas", "migrate", "apply", "--env", "gorm", "--config", atlasConfigURI)
-	cmd.Env = atlasEnv
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		ErrorLog("Atlas migrate apply failed: %v", err)
-		os.Exit(1)
-	}
-	Success("Atlas migration completed successfully")
+	return r, nil
 }
-func runGormMigrate() {
-	cfg, _ := env.Load()
-	moduleName := "github.com/mmycin/goforge"
-	if cfg != nil && cfg.Module != "" {
-		moduleName = cfg.Module
-	}
 
-	Info("Preparing temporary GORM migrator...")
-
-	migratorSource := fmt.Sprintf(`package main
-
-import (
-	"fmt"
-	"os"
-
-	"%s/core/database"
-	"%s/internal/services"
-)
-
-func main() {
-	fmt.Println("→ Connecting to database...")
-	if err := database.Connect(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: Database connection failed: %%v\n", err)
-		os.Exit(1)
-	}
-
-	fmt.Println("→ Starting GORM AutoMigrate...")
-	models := services.Model()
-	if err := database.DB.Gorm.AutoMigrate(models...); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: AutoMigrate failed: %%v\n", err)
-		os.Exit(1)
-	}
-	fmt.Println("✓ Database migration completed successfully")
-}
-`, moduleName, moduleName)
-
-	tmpFile := "goforge_tmp_migrate.go"
-	if err := os.WriteFile(tmpFile, []byte(migratorSource), 0644); err != nil {
-		ErrorLog("Failed to create temporary migrator file: %v", err)
-		os.Exit(1)
-	}
-	defer os.Remove(tmpFile)
-
-	cmd := exec.Command("go", "run", tmpFile)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		ErrorLog("GORM migration failed: %v", err)
-		os.Exit(1)
-	}
-	Success("GORM migration completed successfully")
-}
+func (r viewportRunner) View() string { return r.vp.View() }

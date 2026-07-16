@@ -2,120 +2,127 @@ package cmd
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
-	"strings"
 
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/mmycin/GoForge/internal/tui"
+	"github.com/mmycin/GoForge/internal/tui/confirm"
+	"github.com/mmycin/GoForge/internal/tui/progress"
+	"github.com/mmycin/GoForge/internal/tui/result"
+	"github.com/mmycin/GoForge/internal/usecase"
 	"github.com/spf13/cobra"
 )
 
-func init() {
-	rootCmd.AddCommand(makeCommandCmd)
-	rootCmd.AddCommand(removeCommandCmd)
+func newGenCommandCmd(d *Deps) *cobra.Command {
+	return &cobra.Command{
+		Use:   "gen:command [name]",
+		Short: "Create a custom console command",
+		Long:  `Generate a new CLI command file in internal/console/. Run it via: goforge app run <name>.`,
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name := ""
+			if len(args) == 1 {
+				name = args[0]
+			}
+			return runGenCommand(d, name)
+		},
+	}
 }
 
-var makeCommandCmd = &cobra.Command{
-	Use:   "gen:command [name]",
-	Short: "Create a new console command",
-	Long:  `Generate a new CLI command to be executed via 'GoForge app run [name]'.`,
-	Args:  cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
-		name := args[0]
-		Info("Creating custom command: %s", name)
-		genCommandFile(name)
-	},
+func runGenCommand(d *Deps, name string) error {
+	if name == "" {
+		var err error
+		name, err = promptInput(
+			"Command Name",
+			"Use colons for namespacing, e.g. emails:send-digest\nRun it via: goforge app run <name>",
+			"emails:send-digest",
+		)
+		if err != nil {
+			return err
+		}
+		if name == "" {
+			tui.Info("Cancelled.")
+			return nil
+		}
+	}
+
+	steps := []string{"Writing command file"}
+	pm := progress.New(fmt.Sprintf("Creating command '%s'", name), steps)
+	progressCh := make(chan any, 16)
+	var runErr error
+	var finalFiles []usecase.GeneratedFile
+
+	go func() {
+		runErr = d.GenCommand.Run(name, progressCh)
+		close(progressCh)
+	}()
+
+	runner := newCollectingProgressRunner(pm, progressCh, &finalFiles)
+	prog := tea.NewProgram(runner, tea.WithAltScreen())
+	if _, err := prog.Run(); err != nil {
+		return err
+	}
+
+	if runErr != nil {
+		tui.Error("gen:command failed: %v", runErr)
+		return runErr
+	}
+
+	rm := result.New(
+		fmt.Sprintf("Command '%s' created", name),
+		finalFiles,
+		fmt.Sprintf("goforge app run %s", name),
+	)
+	rp := tea.NewProgram(rm, tea.WithAltScreen())
+	_, err := rp.Run()
+	return err
 }
 
-func genCommandFile(name string) {
-	// The directory in the target project where custom commands live
-	cmdDir := filepath.Join("internal", "console")
-
-	if err := os.MkdirAll(cmdDir, 0755); err != nil {
-		ErrorLog("Failed to assure internal/console exists: %v", err)
-		os.Exit(1)
+func newRemCommandCmd(d *Deps) *cobra.Command {
+	return &cobra.Command{
+		Use:   "rem:command [name]",
+		Short: "Delete a custom console command",
+		Long:  `Permanently delete the command file at internal/console/<name>_cmd.go.`,
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRemCommand(d, args[0])
+		},
 	}
-
-	// name is e.g. "add:test"
-	safeName := strings.ReplaceAll(name, ":", "_")
-	safeName = strings.ReplaceAll(safeName, "-", "_")
-
-	// camel struct
-	camelName := toCamelCase(safeName) + "Cmd"
-
-	fileName := safeName + "_cmd.go"
-	targetPath := filepath.Join(cmdDir, fileName)
-
-	if _, err := os.Stat(targetPath); err == nil {
-		ErrorLog("Command file '%s' already exists at %s", name, targetPath)
-		os.Exit(1)
-	}
-
-	content := fmt.Sprintf(`package console
-
-import (
-	"fmt"
-	"github.com/spf13/cobra"
-)
-
-var %s = &cobra.Command{
-	Use:   "%s",
-	Short: "Description for %s",
-	Long:  %sA comprehensive description for %s%s,
-	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("Executing custom command: %s")
-		// TODO: Add your custom command logic here
-	},
 }
 
-func init() {
-	// Root command registration is handled automatically by init() in this package
-	rootCmd.AddCommand(%s)
-}
-`, camelName, name, name, "`", name, "`", name, camelName)
+func runRemCommand(d *Deps, name string) error {
+	body := fmt.Sprintf(
+		"This will permanently delete:\n\n  • internal/console/%s_cmd.go\n\nThis cannot be undone.",
+		name,
+	)
 
-	if err := os.WriteFile(targetPath, []byte(content), 0644); err != nil {
-		ErrorLog("Failed to write command file: %v", err)
-		os.Exit(1)
+	cm := confirm.New("Remove Command  "+name, body, true)
+	cp := tea.NewProgram(cm, tea.WithAltScreen())
+	finalModel, err := cp.Run()
+	if err != nil {
+		return err
+	}
+	fm, ok := finalModel.(confirm.Model)
+	if !ok || !fm.Confirmed() {
+		tui.Info("Cancelled.")
+		return nil
 	}
 
-	Success("Generated new command at %s", targetPath)
-	Info("You can execute it using: GoForge app run %s", name)
-}
+	steps := []string{"Deleting command file"}
+	pm := progress.New(fmt.Sprintf("Removing command '%s'", name), steps)
+	progressCh := make(chan any, 16)
+	var runErr error
 
-var removeCommandCmd = &cobra.Command{
-	Use:   "rem:command [name]",
-	Short: "Remove a generated console command",
-	Long:  `Permanently delete the local file corresponding to a custom CLI command.`,
-	Args:  cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
-		name := args[0]
-		Info("Removing custom command: %s", name)
-		remCommandFile(name)
-	},
-}
+	go func() {
+		runErr = d.RemCommand.Run(name, progressCh)
+		close(progressCh)
+	}()
 
-func remCommandFile(name string) {
-	cmdDir := filepath.Join("internal", "console")
-	if _, err := os.Stat(cmdDir); os.IsNotExist(err) {
-		ErrorLog("Directory internal/console does not exist")
-		os.Exit(1)
+	prog := tea.NewProgram(newProgressRunner(pm, progressCh), tea.WithAltScreen())
+	if _, err := prog.Run(); err != nil {
+		return err
 	}
-
-	safeName := strings.ReplaceAll(name, ":", "_")
-	safeName = strings.ReplaceAll(safeName, "-", "_")
-
-	fileName := safeName + "_cmd.go"
-	targetPath := filepath.Join(cmdDir, fileName)
-
-	if _, err := os.Stat(targetPath); os.IsNotExist(err) {
-		ErrorLog("Command file '%s' does not exist at %s", name, targetPath)
-		os.Exit(1)
+	if runErr != nil {
+		tui.Error("rem:command failed: %v", runErr)
 	}
-
-	if err := os.Remove(targetPath); err != nil {
-		ErrorLog("Failed to remove command file: %v", err)
-		os.Exit(1)
-	}
-
-	Success("Removed command at %s", targetPath)
+	return runErr
 }

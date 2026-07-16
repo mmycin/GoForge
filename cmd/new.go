@@ -1,190 +1,304 @@
 package cmd
 
 import (
-	"bufio"
 	"fmt"
-	"io/fs"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"strconv"
+	"regexp"
 	"strings"
 
+	"github.com/charmbracelet/huh"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/mmycin/GoForge/internal/tui"
+	"github.com/mmycin/GoForge/internal/tui/progress"
+	"github.com/mmycin/GoForge/internal/usecase"
 	"github.com/spf13/cobra"
 )
 
-func init() {
-	rootCmd.AddCommand(newCmd)
+var modulePathRe = regexp.MustCompile(`^[a-zA-Z0-9._\-]+(/[a-zA-Z0-9._\-]+)+$`)
+
+func newNewCmd(d *Deps) *cobra.Command {
+	return &cobra.Command{
+		Use:   "new",
+		Short: "Create a new GoForge project",
+		Long:  `Launch a 4-step wizard to scaffold a new GoForge project from the official template.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runNewWizard(d)
+		},
+	}
 }
 
-var newCmd = &cobra.Command{
-	Use:   "new",
-	Short: "Create a new GoForge project",
-	Long:  `Create a new GoForge project from the official template, with custom project and module names.`,
-	Run: func(cmd *cobra.Command, args []string) {
-		reader := bufio.NewReader(os.Stdin)
+func runNewWizard(d *Deps) error {
+	var (
+		projectName string
+		modulePath  string
+		databases   []string
+		initGit     = true
+	)
 
-		fmt.Print("Name of the Project: ")
-		projectName, _ := reader.ReadString('\n')
-		projectName = strings.TrimSpace(projectName)
-		if projectName == "" {
-			ErrorLog("Project name cannot be empty")
-			return
-		}
+	gitAvailable := d.Git.IsAvailable()
 
-		fmt.Print("Name of the Module: ")
-		moduleName, _ := reader.ReadString('\n')
-		moduleName = strings.TrimSpace(moduleName)
-		if moduleName == "" {
-			ErrorLog("Module name cannot be empty")
-			return
-		}
+	// ── Step 1-4: huh form ────────────────────────────────────────────────────
+	form := huh.NewForm(
+		// Step 1 — Project name
+		huh.NewGroup(
+			huh.NewInput().
+				Title("Project Name").
+				Description("The folder name for your project. Use kebab-case.").
+				Placeholder("my-app").
+				Value(&projectName).
+				Validate(func(s string) error {
+					if strings.TrimSpace(s) == "" {
+						return fmt.Errorf("project name is required")
+					}
+					return nil
+				}),
+		),
+		// Step 2 — Module path
+		huh.NewGroup(
+			huh.NewInput().
+				Title("Module Path").
+				Description("e.g. github.com/yourname/my-app\nUsed as the root Go import path throughout the project.").
+				Placeholder("github.com/yourname/my-app").
+				Value(&modulePath).
+				Validate(func(s string) error {
+					s = strings.TrimSpace(s)
+					if s == "" {
+						return fmt.Errorf("module path is required")
+					}
+					if s == "github.com/" || strings.HasSuffix(s, "/") {
+						return fmt.Errorf("please provide a full path, e.g. github.com/you/my-app")
+					}
+					if !modulePathRe.MatchString(s) {
+						return fmt.Errorf("must be a valid Go module path")
+					}
+					return nil
+				}),
+		),
+		// Step 3 — Databases
+		huh.NewGroup(
+			huh.NewMultiSelect[string]().
+				Title("Select Databases").
+				Description("At least one is required. SQLite is always safe for development.").
+				Options(
+					huh.NewOption("SQLite  — zero-config, great for development", "sqlite"),
+					huh.NewOption("MySQL   — popular relational database", "mysql"),
+					huh.NewOption("PostgreSQL — advanced open-source RDBMS", "postgresql"),
+					huh.NewOption("SQL Server — Microsoft enterprise database", "sqlserver"),
+				).
+				Value(&databases).
+				Validate(func(s []string) error {
+					if len(s) == 0 {
+						return fmt.Errorf("select at least one database")
+					}
+					return nil
+				}),
+		),
+		// Step 4 — Git init (only if git is available)
+		huh.NewGroup(
+			huh.NewConfirm().
+				Title("Initialize a Git repository?").
+				Description(gitDescription(gitAvailable)).
+				Value(&initGit),
+		),
+	).WithTheme(huh.ThemeCatppuccin())
 
-		selectedDBs := promptDatabases(reader)
-
-		createNewProject(projectName, moduleName, selectedDBs)
-	},
-}
-
-// allDrivers is the ordered list of supported databases shown in the prompt.
-var allDrivers = []struct {
-	label string // display name
-	key   string // matches the driver file name (without .go)
-}{
-	{"SQLite", "sqlite"},
-	{"MySQL", "mysql"},
-	{"PostgreSQL", "postgresql"},
-	{"SQL Server", "sqlserver"},
-}
-
-// driverFiles maps a driver key to its file path inside the cloned project.
-var driverFiles = map[string]string{
-	"sqlite":    "core/database/drivers/sqlite.go",
-	"mysql":     "core/database/drivers/mysql.go",
-	"postgresql": "core/database/drivers/postgresql.go",
-	"sqlserver": "core/database/drivers/sqlserver.go",
-}
-
-// promptDatabases shows a numbered multi-select prompt and returns the keys
-// of the databases the user chose. Defaults to SQLite (index 1) if the user
-// presses Enter without typing anything.
-func promptDatabases(reader *bufio.Reader) []string {
-	fmt.Println("")
-	fmt.Println("Select databases (comma-separated numbers, default: 1):")
-	for i, d := range allDrivers {
-		fmt.Printf("  %d) %s\n", i+1, d.label)
+	p := tea.NewProgram(newWizardRunner(form, "New Project", 4), tea.WithAltScreen())
+	if _, err := p.Run(); err != nil {
+		return err
 	}
-	fmt.Print("> ")
-
-	line, _ := reader.ReadString('\n')
-	line = strings.TrimSpace(line)
-
-	// Default: SQLite only
-	if line == "" {
-		return []string{"sqlite"}
-	}
-
-	seen := map[string]bool{}
-	var selected []string
-
-	for _, part := range strings.Split(line, ",") {
-		part = strings.TrimSpace(part)
-		n, err := strconv.Atoi(part)
-		if err != nil || n < 1 || n > len(allDrivers) {
-			Warning("Ignoring invalid selection %q", part)
-			continue
-		}
-		key := allDrivers[n-1].key
-		if !seen[key] {
-			seen[key] = true
-			selected = append(selected, key)
-		}
-	}
-
-	if len(selected) == 0 {
-		Warning("No valid databases selected, defaulting to SQLite")
-		return []string{"sqlite"}
-	}
-
-	return selected
-}
-
-func createNewProject(projectName, moduleName string, selectedDBs []string) {
-	Info("Creating new project: %s", projectName)
-
-	// 1. Clone the template
-	cloneCmd := exec.Command("git", "clone", "--branch", "main", "--quiet", "https://github.com/mmycin/goforge-template", projectName)
-	cloneCmd.Stdout = nil
-	cloneCmd.Stderr = nil
-	if err := cloneCmd.Run(); err != nil {
-		ErrorLog("Failed to clone template: %v", err)
-		return
-	}
-
-	// 2. Remove .git directory to start fresh
-	if err := os.RemoveAll(filepath.Join(projectName, ".git")); err != nil {
-		Warning("Failed to remove .git directory: %v", err)
-	}
-
-	// 3. Replace module name in all Go and config files
-	oldModule := "github.com/mmycin/goforge"
-	err := filepath.WalkDir(projectName, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return err
-		}
-		content, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		if strings.Contains(string(content), oldModule) {
-			return os.WriteFile(path, []byte(strings.ReplaceAll(string(content), oldModule, moduleName)), 0644)
-		}
+	if form.State == huh.StateAborted {
+		tui.Info("Cancelled — no project was created.")
 		return nil
-	})
-	if err != nil {
-		ErrorLog("Failed to replace module name: %v", err)
-		return
 	}
 
-	// 4. Delete driver files for unselected databases
-	selectedSet := map[string]bool{}
-	for _, k := range selectedDBs {
-		selectedSet[k] = true
+	// Sanitise
+	projectName = strings.TrimSpace(projectName)
+	modulePath = strings.TrimSpace(modulePath)
+	if len(databases) == 0 {
+		databases = []string{"sqlite"}
 	}
 
-	var removed []string
-	for key, relPath := range driverFiles {
-		if selectedSet[key] {
-			continue
-		}
-		fullPath := filepath.Join(projectName, relPath)
-		if err := os.Remove(fullPath); err != nil && !os.IsNotExist(err) {
-			Warning("Could not delete driver file %s: %v", relPath, err)
-			continue
-		}
-		removed = append(removed, key)
+	// ── Progress screen ───────────────────────────────────────────────────────
+	steps := []string{
+		"Creating project structure",
+		"Initialising module path",
+		"Initializing database drivers",
+		"Installing dependencies",
+	}
+	if initGit && gitAvailable {
+		steps = append(steps, "Initialising git repository", "Creating initial commit")
 	}
 
-	if len(removed) > 0 {
-		Info("Removed unused database drivers: %s", strings.Join(removed, ", "))
-		for _, key := range removed {
-			Info("  ✓ Deleted %s", driverFiles[key])
-		}
+	pm := progress.New(fmt.Sprintf("Setting up %s", projectName), steps)
+	progressCh := make(chan any, 64)
+
+	input := usecase.NewProjectInput{
+		ProjectName: projectName,
+		ModulePath:  modulePath,
+		Databases:   databases,
+		InitGit:     initGit && gitAvailable,
 	}
 
-	// 5. go mod tidy — drops packages for deleted drivers automatically
-	Info("Running go mod tidy in %s...", projectName)
-	tidyCmd := exec.Command("go", "mod", "tidy")
-	tidyCmd.Dir = projectName
-	tidyCmd.Stdout = os.Stdout
-	tidyCmd.Stderr = os.Stderr
-	if err := tidyCmd.Run(); err != nil {
-		Warning("Failed to run go mod tidy: %v", err)
+	var runErr error
+	go func() {
+		runErr = d.NewProject.Run(input, progressCh)
+		close(progressCh)
+	}()
+
+	prog := tea.NewProgram(newProgressRunner(pm, progressCh), tea.WithAltScreen())
+	if _, err := prog.Run(); err != nil {
+		return err
 	}
 
-	fmt.Println("")
-	Success("Project %s created successfully!", projectName)
-	Info("To get started:")
-	Info("  cd %s", projectName)
-	Info("  GoForge app serve")
+	if runErr != nil {
+		tui.Error("Project creation failed: %v", runErr)
+		return runErr
+	}
+
+	// ── Success screen ────────────────────────────────────────────────────────
+	fmt.Println(renderSuccessCard(projectName))
+	return nil
 }
+
+func gitDescription(available bool) string {
+	if available {
+		return "Runs git init and creates an initial commit."
+	}
+	return "git not found in PATH — version control setup will be skipped."
+}
+
+func renderSuccessCard(name string) string {
+	tui.Success("  %s is ready\n", name)
+	tui.Info("  Get started:\n")
+	for _, line := range []string{
+		"cd " + name,
+		"cp .env.example .env",
+		"goforge gen:key",
+		"goforge gen:migration init",
+		"goforge migrate",
+		"goforge app serve",
+	} {
+		fmt.Printf("    %s\n", tui.CodeStyle.Render(line))
+	}
+	fmt.Println()
+	fmt.Println("  Happy building. 🚀")
+	return ""
+}
+
+// ── Internal adapter models ───────────────────────────────────────────────────
+
+// wizardRunner is a thin tea.Model that wraps a huh.Form with GoForge chrome.
+type wizardRunner struct {
+	form       *huh.Form
+	title      string
+	totalSteps int
+}
+
+func newWizardRunner(form *huh.Form, title string, steps int) wizardRunner {
+	return wizardRunner{form: form, title: title, totalSteps: steps}
+}
+
+func (w wizardRunner) Init() tea.Cmd { return w.form.Init() }
+
+func (w wizardRunner) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	form, cmd := w.form.Update(msg)
+	if f, ok := form.(*huh.Form); ok {
+		w.form = f
+	}
+	if w.form.State == huh.StateCompleted || w.form.State == huh.StateAborted {
+		return w, tea.Quit
+	}
+	return w, cmd
+}
+
+func (w wizardRunner) View() string {
+	header := tui.Header(w.title)
+	footer := tui.Footer("enter", "continue", "esc", "back")
+	return header + "\n\n" + w.form.View() + "\n" + footer
+}
+
+// progressRunner is a tea.Model that drives a progress.Model from a channel.
+type progressRunner struct {
+	pm         progress.Model
+	progressCh <-chan any
+	done       bool
+}
+
+func newProgressRunner(pm progress.Model, ch <-chan any) progressRunner {
+	return progressRunner{pm: pm, progressCh: ch}
+}
+
+type progressTickMsg struct{ event any }
+type progressDoneMsg struct{}
+
+func (r progressRunner) Init() tea.Cmd {
+	return tea.Batch(r.pm.Init(), r.waitForEvent())
+}
+
+func (r progressRunner) waitForEvent() tea.Cmd {
+	return func() tea.Msg {
+		event, ok := <-r.progressCh
+		if !ok {
+			return progressDoneMsg{}
+		}
+		return progressTickMsg{event: event}
+	}
+}
+
+func (r progressRunner) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case progressTickMsg:
+		switch e := msg.event.(type) {
+		case usecase.StepStarted:
+			idx := r.pm.IndexOf(e.Label)
+			r.pm.Advance(idx)
+		case usecase.StepDone:
+			idx := r.pm.IndexOf(e.Label)
+			r.pm.Complete(idx)
+		case usecase.StepFailed:
+			idx := r.pm.IndexOf(e.Label)
+			r.pm.Fail(idx, e.Err)
+		case usecase.UseCaseDone:
+			r.pm.SetDone()
+			r.done = true
+			// Don't queue waitForEvent — we're done.
+			updated, cmd := r.pm.Update(msg)
+			if m, ok := updated.(progress.Model); ok {
+				r.pm = m
+			}
+			return r, cmd
+		}
+		updated, cmd := r.pm.Update(msg)
+		if m, ok := updated.(progress.Model); ok {
+			r.pm = m
+		}
+		return r, tea.Batch(cmd, r.waitForEvent())
+
+	case progressDoneMsg:
+		// Channel closed without an explicit UseCaseDone — mark done.
+		if !r.done {
+			r.pm.SetDone()
+			r.done = true
+		}
+		return r, nil
+
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "ctrl+c":
+			return r, tea.Quit
+		case "enter", "q", "esc":
+			if r.done {
+				return r, tea.Quit
+			}
+		}
+
+	default:
+		updated, cmd := r.pm.Update(msg)
+		if m, ok := updated.(progress.Model); ok {
+			r.pm = m
+		}
+		return r, cmd
+	}
+	return r, nil
+}
+
+func (r progressRunner) View() string { return r.pm.View() }

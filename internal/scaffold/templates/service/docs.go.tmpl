@@ -1,0 +1,36 @@
+package {{.PackageName}}
+
+import (
+	"context"
+	"net/http"
+
+	"github.com/danielgtaylor/huma/v2"
+	"github.com/danielgtaylor/huma/v2/adapters/humagin"
+	"github.com/gin-gonic/gin"
+	"{{.ModulePath}}/boot/server"
+)
+
+// {{.TypeName}}Docs registers OpenAPI documentation for the {{.PackageName}} service.
+type {{.TypeName}}Docs struct{}
+
+// New{{.TypeName}}Docs creates a new {{.TypeName}}Docs.
+func New{{.TypeName}}Docs() *{{.TypeName}}Docs {
+	return &{{.TypeName}}Docs{}
+}
+
+// Register attaches the OpenAPI spec and health endpoint to the engine.
+func (d *{{.TypeName}}Docs) Register(engine *gin.Engine) {
+	config := server.NewHumaConfig("{{.TypeName}} API", "1.0.0", "/api/docs/{{.PackageName}}")
+	api := humagin.New(engine, config)
+
+	huma.Register(api, huma.Operation{
+		OperationID: "get-{{.PackageName}}-health",
+		Method:      http.MethodGet,
+		Path:        "/api/{{.PackageName}}/health",
+		Summary:     "Health check",
+		Description: "Returns OK when the {{.PackageName}} service is reachable.",
+		Tags:        []string{"Health"},
+	}, func(ctx context.Context, input *struct{}) (*struct{ Body string }, error) {
+		return &struct{ Body string }{Body: "OK"}, nil
+	})
+}

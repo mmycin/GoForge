@@ -1,0 +1,23 @@
+package {{.PackageName}}
+
+import "github.com/gin-gonic/gin"
+
+// {{.TypeName}}Routes wires the HTTP handler into a gin.Engine.
+type {{.TypeName}}Routes struct {
+	handler *{{.TypeName}}Handler
+}
+
+// New{{.TypeName}}Routes creates a new {{.TypeName}}Routes.
+func New{{.TypeName}}Routes(handler *{{.TypeName}}Handler) *{{.TypeName}}Routes {
+	return &{{.TypeName}}Routes{handler: handler}
+}
+
+// Register attaches all routes to the engine.
+func (r *{{.TypeName}}Routes) Register(engine *gin.Engine) {
+	group := engine.Group("/api/{{.PackageName}}s")
+	// Global middleware is applied in boot/server/http.go
+
+	group.GET("/", r.handler.GetAll)
+	group.GET("/:id", r.handler.GetByID)
+	group.POST("/", r.handler.Create)
+}

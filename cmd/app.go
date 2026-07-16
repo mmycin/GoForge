@@ -4,44 +4,46 @@ import (
 	"os"
 	"os/exec"
 
+	"github.com/mmycin/GoForge/internal/tui"
 	"github.com/spf13/cobra"
 )
 
-func init() {
-	rootCmd.AddCommand(appCmd)
-	appCmd.AddCommand(appServeCmd)
+func newAppCmd() *cobra.Command {
+	appCmd := &cobra.Command{
+		Use:   "app",
+		Short: "Manage and run application-specific commands",
+		Long:  `Proxy commands to the local GoForge application via go run app/main.go.`,
+	}
+	appCmd.AddCommand(newAppServeCmd())
+	return appCmd
 }
 
-var appCmd = &cobra.Command{
-	Use:   "app",
-	Short: "Manage and run application-specific commands",
-	Long:  `Proxy to the local application. Commands inside app will run locally against the user's main.go.`,
-}
+func newAppServeCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:                "serve [args...]",
+		Short:              "Start the development server",
+		Long:               `Run the application or a locally defined GoForge task using go run app/main.go.`,
+		DisableFlagParsing: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			tui.Info("Starting application…")
 
-var appServeCmd = &cobra.Command{
-	Use:   "serve [command]",
-	Short: "Run the application or a locally defined GoForge task",
-	Long:  `Executes the specified command context inside the current GoForge project using go run app/main.go. Defaults to 'serve'.`,
-	// We want to accept any number of arguments after `serve`
-	DisableFlagParsing: true,
-	Run: func(cmd *cobra.Command, args []string) {
-		Info("Running application command...")
+			execArgs := []string{"run", "app/main.go"}
+			if len(args) == 0 {
+				execArgs = append(execArgs, "serve")
+			} else {
+				execArgs = append(execArgs, args...)
+			}
 
-		var execArgs []string
-		if len(args) == 0 {
-			execArgs = []string{"run", "app/main.go", "serve"}
-		} else {
-			execArgs = append([]string{"run", "app/main.go"}, args...)
-		}
+			proxy := exec.Command("go", execArgs...)
+			proxy.Stdout = os.Stdout
+			proxy.Stderr = os.Stderr
+			proxy.Stdin = os.Stdin
 
-		proxy := exec.Command("go", execArgs...)
-		proxy.Stdout = os.Stdout
-		proxy.Stderr = os.Stderr
-		proxy.Stdin = os.Stdin
-
-		if err := proxy.Run(); err != nil {
-			ErrorLog("Command failed: %v", err)
-			os.Exit(1)
-		}
-	},
+			if err := proxy.Run(); err != nil {
+				tui.Error("Command failed: %v", err)
+				return err
+			}
+			return nil
+		},
+	}
 }

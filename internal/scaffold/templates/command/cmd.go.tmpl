@@ -1,0 +1,22 @@
+package console
+
+import (
+	"fmt"
+
+	"github.com/spf13/cobra"
+)
+
+// {{.TypeName}} is the cobra command for "{{.CommandUse}}".
+var {{.TypeName}} = &cobra.Command{
+	Use:   "{{.CommandUse}}",
+	Short: "Description for {{.CommandUse}}",
+	Long:  `A comprehensive description for {{.CommandUse}}.`,
+	Run: func(cmd *cobra.Command, args []string) {
+		fmt.Println("Executing: {{.CommandUse}}")
+		// TODO: add your command logic here
+	},
+}
+
+func init() {
+	rootCmd.AddCommand({{.TypeName}})
+}

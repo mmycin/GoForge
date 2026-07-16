@@ -2,407 +2,129 @@ package cmd
 
 import (
 	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"strings"
-	"text/template"
-	"time"
-	"unicode"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/mmycin/GoForge/internal/env"
+	"github.com/mmycin/GoForge/internal/tui"
+	"github.com/mmycin/GoForge/internal/tui/confirm"
+	"github.com/mmycin/GoForge/internal/tui/picker"
+	"github.com/mmycin/GoForge/internal/tui/progress"
 	"github.com/spf13/cobra"
 )
 
-func init() {
-	rootCmd.AddCommand(genProtoCmd)
-	rootCmd.AddCommand(remProtoCmd)
-}
-
-var genProtoCmd = &cobra.Command{
-	Use:   "gen:proto [service]",
-	Short: "Compile proto files and generate gRPC code",
-	Long:  `Compiles .proto files using protoc and generates Go server scaffolding in internal/services.`,
-	Run: func(cmd *cobra.Command, args []string) {
-		name := ""
-		if len(args) > 0 {
-			name = args[0]
-		}
-		if err := generateProto(name); err != nil {
-			ErrorLog("%v", err)
-			os.Exit(1)
-		}
-	},
-}
-
-var remProtoCmd = &cobra.Command{
-	Use:   "rem:proto",
-	Short: "Remove generated gRPC code",
-	Long:  `Permanently remove generated .pb.go and _grpc.pb.go files.`,
-	Run: func(cmd *cobra.Command, args []string) {
-		Info("Removing generated proto files...")
-		if err := removeProto(); err != nil {
-			ErrorLog("%v", err)
-			os.Exit(1)
-		}
-	},
-}
-
-func removeProto() error {
-	servicesDir := "internal/services"
-	entries, err := os.ReadDir(servicesDir)
-	if err != nil {
-		return err
+func newGenProtoCmd(d *Deps) *cobra.Command {
+	return &cobra.Command{
+		Use:   "gen:proto [service]",
+		Short: "Compile proto files & generate gRPC stubs",
+		Long:  `Compile .proto files with protoc and scaffold Go gRPC server stubs.`,
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			svc := ""
+			if len(args) == 1 {
+				svc = args[0]
+			}
+			return runGenProto(d, svc)
+		},
 	}
-
-	for _, e := range entries {
-		if e.IsDir() {
-			// Remove any .pb.go files in the service directory
-			files, err := filepath.Glob(filepath.Join(servicesDir, e.Name(), "*.pb.go"))
-			if err != nil {
-				Warning("Failed to find .pb.go files: %v", err)
-			}
-			for _, f := range files {
-				Info("  Removing %s", f)
-				if err := os.Remove(f); err != nil {
-					Warning("Failed to remove %s: %v", f, err)
-				}
-			}
-			// Also look in gen/ if it exists
-			genDir := filepath.Join("internal/proto", e.Name(), "gen")
-			if _, err := os.Stat(genDir); err == nil {
-				Info("  Removing %s", genDir)
-				if err := os.RemoveAll(genDir); err != nil {
-					Warning("Failed to remove %s: %v", genDir, err)
-				}
-			}
-		}
-	}
-
-	Success("Generated proto files removed.")
-	return nil
 }
 
-func generateProto(serviceName string) error {
-	protoDir := "internal/proto"
-	servicesDir := "internal/services"
-
-	// Find proto files
-	var protoFiles []string
-	if serviceName != "" {
-		// Specific service
-		p := filepath.Join(protoDir, serviceName, serviceName+".proto")
-		if _, err := os.Stat(p); err == nil {
-			protoFiles = append(protoFiles, p)
-		} else {
-			return fmt.Errorf("proto file not found: %s", p)
-		}
-	} else {
-		// Scan all
-		entries, err := os.ReadDir(protoDir)
+func runGenProto(d *Deps, serviceName string) error {
+	// ── Service picker ────────────────────────────────────────────────────────
+	if serviceName == "" {
+		services, err := d.Generator.ListServices()
 		if err != nil {
-			if os.IsNotExist(err) {
-				Info("No proto directory found.")
-				return nil
-			}
+			return fmt.Errorf("could not list services: %w", err)
+		}
+		if len(services) == 0 {
+			tui.Error("No services found — run goforge gen:service <name> first.")
+			return nil
+		}
+
+		const allLabel = "All services"
+		values := append([]string{allLabel}, services...)
+		descs := make([]string, len(values))
+		descs[0] = "Compile every proto file"
+		for i, s := range services {
+			descs[i+1] = "internal/proto/" + s
+		}
+
+		pm := picker.New("Compile Proto — select a service", values, descs)
+		pp := tea.NewProgram(pm, tea.WithAltScreen())
+		finalModel, err := pp.Run()
+		if err != nil {
 			return err
 		}
-		for _, e := range entries {
-			if e.IsDir() {
-				p := filepath.Join(protoDir, e.Name(), e.Name()+".proto")
-				if _, err := os.Stat(p); err == nil {
-					protoFiles = append(protoFiles, p)
-				}
-			}
+		fm, ok := finalModel.(picker.Model)
+		if !ok || fm.Selected() == "" {
+			tui.Info("Cancelled.")
+			return nil
 		}
-	}
-
-	if len(protoFiles) == 0 {
-		Info("No proto files found.")
-		return nil
+		if fm.Selected() != allLabel {
+			serviceName = fm.Selected()
+		}
 	}
 
 	cfg, _ := env.Load()
-	moduleName := "github.com/mmycin/goforge"
+	modulePath := "github.com/mmycin/goforge"
 	if cfg != nil && cfg.Module != "" {
-		moduleName = cfg.Module
-	} else {
-		Warning("Could not determine module name: Using default: %s. Generated paths might be incorrect.", moduleName)
+		modulePath = cfg.Module
 	}
 
-	for _, p := range protoFiles {
-		Info("Compiling %s...", p)
-
-		args := []string{
-			"--go_out=.",
-			"--go-grpc_out=.",
-			p,
-		}
-
-		if moduleName != "" {
-			args = append(args, "--go_opt=module="+moduleName)
-			args = append(args, "--go-grpc_opt=module="+moduleName)
-		}
-
-		cmd := exec.Command("protoc", args...)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("protoc failed for %s: %w", p, err)
-		}
-
-		// Generate Scaffold
-		// Extract service name from path: proto/<service>/<service>.proto
-		parts := strings.Split(filepath.ToSlash(p), "/")
-		if len(parts) >= 2 {
-			svcName := parts[len(parts)-2]
-			if err := generateGrpcScaffold(servicesDir, svcName, moduleName); err != nil {
-				return err
-			}
-			if err := updateModelGo(svcName, moduleName); err != nil {
-				Warning("  Could not update model.go for %s: %v", svcName, err)
-			}
-		}
+	title := "Compiling all proto files"
+	if serviceName != "" {
+		title = fmt.Sprintf("Compiling %s.proto", serviceName)
 	}
 
-	Success("Proto compilation and scaffolding complete.")
-	return nil
-}
-
-func updateModelGo(svcName, moduleName string) error {
-	modelPath := filepath.Join("internal/services", svcName, "model.go")
-	if _, err := os.Stat(modelPath); os.IsNotExist(err) {
-		return nil
-	}
-
-	content, err := os.ReadFile(modelPath)
-	if err != nil {
-		return err
-	}
-
-	src := string(content)
-	if strings.Contains(src, ") ToProto()") || strings.Contains(src, ") ToModel()") {
-		return nil
-	}
-
-	lines := strings.Split(src, "\n")
-	var structName string
-	var fields []string
-	inStruct := false
-
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "type ") && strings.HasSuffix(trimmed, " struct {") {
-			parts := strings.Fields(trimmed)
-			if len(parts) >= 2 {
-				structName = parts[1]
-				inStruct = true
-			}
-			continue
-		}
-		if inStruct {
-			if trimmed == "}" {
-				inStruct = false
-				break
-			}
-			if trimmed != "" && !strings.HasPrefix(trimmed, "//") {
-				f := strings.Fields(trimmed)
-				if len(f) >= 2 {
-					// Check if it's a exported field
-					if len(f[0]) > 0 && unicode.IsUpper(rune(f[0][0])) {
-						fields = append(fields, f[0])
-					}
-				}
-			}
-		}
-	}
-
-	if structName == "" {
-		return nil
-	}
-
-	var toProtoFields []string
-	var toModelFields []string
-	hasID := false
-
-	for _, f := range fields {
-		if f == "ID" {
-			hasID = true
-			toProtoFields = append(toProtoFields, "Id:          strconv.FormatUint(uint64(t.ID), 10),")
-			toModelFields = append(toModelFields, "ID:          t.ID,")
-		} else if f == "CreatedAt" || f == "UpdatedAt" {
-			continue
-		} else {
-			toProtoFields = append(toProtoFields, fmt.Sprintf("%-12s t.%s,", f+":", f))
-			toModelFields = append(toModelFields, fmt.Sprintf("%-12s t.%s,", f+":", f))
-		}
-	}
-
-	methods := fmt.Sprintf(`
-func (t *%s) ToProto() *pb.%s {
-	return &pb.%s{
-		%s
-	}
-}
-
-func (t *%s) ToModel() *%s {
-	return &%s{
-		%s
-	}
-}
-`, structName, structName, structName, strings.Join(toProtoFields, "\n\t\t"), structName, structName, structName, strings.Join(toModelFields, "\n\t\t"))
-
-	// Add imports
-	if !strings.Contains(src, "import (") && !strings.Contains(src, "import \"") {
-		// No imports yet
-		src = strings.Replace(src, "package "+svcName, "package "+svcName+"\n\nimport (\n)", 1)
-	}
-
-	if strings.Contains(src, "import (") {
-		if hasID && !strings.Contains(src, "\"strconv\"") {
-			src = strings.Replace(src, "import (", "import (\n\t\"strconv\"", 1)
-		}
-		if !strings.Contains(src, "\""+moduleName+"/internal/proto/"+svcName+"/gen\"") {
-			src = strings.Replace(src, "import (", fmt.Sprintf("import (\n\tpb \"%s/internal/proto/%s/gen\"", moduleName, svcName), 1)
-		}
-	} else if strings.Contains(src, "import \"") {
-		// Single import line, convert to block
-		src = strings.Replace(src, "import \"", "import (\n\t\"", 1)
-		src = strings.Replace(src, "\"\n", "\"\n)\n", 1)
-		// Now it should have import ( and we can recurse or just handle it here
-		if hasID && !strings.Contains(src, "\"strconv\"") {
-			src = strings.Replace(src, "import (", "import (\n\t\"strconv\"", 1)
-		}
-		if !strings.Contains(src, "\""+moduleName+"/internal/proto/"+svcName+"/gen\"") {
-			src = strings.Replace(src, "import (", fmt.Sprintf("import (\n\tpb \"%s/internal/proto/%s/gen\"", moduleName, svcName), 1)
-		}
-	}
-
-	newContent := strings.TrimSpace(src) + "\n" + methods
-	return os.WriteFile(modelPath, []byte(newContent), 0644)
-}
-
-func generateGrpcScaffold(servicesDir, serviceName, moduleName string) error {
-	svcDir := filepath.Join(servicesDir, serviceName)
-	if err := os.MkdirAll(svcDir, 0755); err != nil {
-		return err
-	}
-
-	grpcFile := filepath.Join(svcDir, "grpc.go")
-	Info("  Generating scaffold: %s", grpcFile)
-
-	camelName := toCamelCase(serviceName)
-	methods, err := parseProtoMethods(serviceName)
-	if err != nil {
-		Warning("  Could not parse proto file for stub generation: %v", err)
-	}
-
-	data := struct {
-		Package   string
-		Title     string
-		Methods   []string
-		Module    string
-		Timestamp string
-	}{
-		Package:   serviceName,
-		Title:     camelName,
-		Methods:   methods,
-		Module:    moduleName,
-		Timestamp: time.Now().Format(time.RFC3339),
-	}
-
-	tmpl := `// Generated at {{.Timestamp}}
-package {{.Package}}
-
-import (
-	"context"
-
-	"{{.Module}}/boot/server"
-	pb "{{.Module}}/internal/proto/{{.Package}}/gen"
-	"google.golang.org/grpc"
-)
-
-type {{.Title}}GRPC struct {
-	pb.Unimplemented{{.Title}}ServiceServer
-}
-
-func init() {
-	server.RegisterGRPC(func(s *grpc.Server) {
-		pb.Register{{.Title}}ServiceServer(s, &{{.Title}}GRPC{})
+	// gen:proto runs protoc (external subprocess) — use viewport for live output.
+	return runWithViewport(d, title, func(ch chan<- any) error {
+		return d.GenProto.Run(serviceName, modulePath, ch)
 	})
 }
 
-{{range .Methods}}
-func (t *{{$.Title}}GRPC) {{.}} {
-	return nil, nil
-}
-{{end}}
-`
+// ── rem:proto ─────────────────────────────────────────────────────────────────
 
-	t, err := template.New("grpc").Parse(tmpl)
+func newRemProtoCmd(d *Deps) *cobra.Command {
+	return &cobra.Command{
+		Use:   "rem:proto",
+		Short: "Remove generated gRPC code",
+		Long:  `Permanently remove generated .pb.go files and gen/ directories.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRemProto(d)
+		},
+	}
+}
+
+func runRemProto(d *Deps) error {
+	body := "This will remove all *.pb.go files and internal/proto/*/gen/ directories.\n\nThis cannot be undone."
+	cm := confirm.New("Remove Generated Proto Code", body, true)
+	cp := tea.NewProgram(cm, tea.WithAltScreen())
+	finalModel, err := cp.Run()
 	if err != nil {
 		return err
 	}
+	fm, ok := finalModel.(confirm.Model)
+	if !ok || !fm.Confirmed() {
+		tui.Info("Cancelled.")
+		return nil
+	}
 
-	f, err := os.Create(grpcFile)
-	if err != nil {
+	// Use a progress screen so there's visible feedback.
+	steps := []string{"Removing generated proto files"}
+	pm := progress.New("Removing Generated Proto Code", steps)
+	progressCh := make(chan any, 32)
+	var runErr error
+
+	go func() {
+		runErr = d.RemProto.Run(progressCh)
+		close(progressCh)
+	}()
+
+	prog := tea.NewProgram(newProgressRunner(pm, progressCh), tea.WithAltScreen())
+	if _, err := prog.Run(); err != nil {
 		return err
 	}
-	defer f.Close()
-
-	return t.Execute(f, data)
-}
-
-func parseProtoMethods(serviceName string) ([]string, error) {
-	protoFile := filepath.Join("internal/proto", serviceName, serviceName+".proto")
-	content, err := os.ReadFile(protoFile)
-	if err != nil {
-		return nil, err
+	if runErr != nil {
+		tui.Error("rem:proto failed: %v", runErr)
 	}
-
-	lines := strings.Split(string(content), "\n")
-	var methods []string
-	inService := false
-
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "service ") {
-			inService = true
-			continue
-		}
-		if inService {
-			if strings.HasPrefix(line, "}") {
-				break
-			}
-			if strings.HasPrefix(line, "rpc ") {
-				// rpc Create(CreateRequest) returns (CreateResponse);
-				parts := strings.Fields(line)
-				if len(parts) >= 4 {
-					methodName := parts[1]
-					// Remove parentheses if name is like "Create("
-					methodName = strings.Split(methodName, "(")[0]
-
-					// Extract request type: (CreateRequest)
-					reqPart := strings.Join(parts[1:], " ")
-					reqStart := strings.Index(reqPart, "(")
-					reqEnd := strings.Index(reqPart, ")")
-					if reqStart != -1 && reqEnd != -1 {
-						reqType := reqPart[reqStart+1 : reqEnd]
-
-						// Extract response type: (CreateResponse)
-						respPart := reqPart[reqEnd+1:]
-						resStart := strings.Index(respPart, "(")
-						resEnd := strings.Index(respPart, ")")
-						if resStart != -1 && resEnd != -1 {
-							resType := respPart[resStart+1 : resEnd]
-							// Construct method signature
-							methods = append(methods, fmt.Sprintf("%s(ctx context.Context, in *pb.%s) (*pb.%s, error)", methodName, reqType, resType))
-						}
-					}
-				}
-			}
-		}
-	}
-
-	return methods, nil
+	return runErr
 }

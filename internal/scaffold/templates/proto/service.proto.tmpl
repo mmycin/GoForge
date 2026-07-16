@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+package {{.PackageName}};
+
+option go_package = "{{.ModulePath}}/internal/proto/{{.PackageName}}/gen";
+
+// {{.TypeName}}Service defines the gRPC contract for the {{.PackageName}} domain.
+service {{.TypeName}}Service {
+  rpc Create(CreateRequest) returns (CreateResponse);
+  rpc Get(GetRequest)       returns (GetResponse);
+  rpc List(ListRequest)     returns (ListResponse);
+  rpc Update(UpdateRequest) returns (UpdateResponse);
+  rpc Delete(DeleteRequest) returns (DeleteResponse);
+}
+
+// {{.TypeName}} is the core domain message.
+message {{.TypeName}} {
+  string id         = 1;
+  string created_at = 2;
+  string updated_at = 3;
+}
+
+message CreateRequest  {}
+message CreateResponse {}
+
+message GetRequest     { string id = 1; }
+message GetResponse    {}
+
+message ListRequest    { int32 page = 1; int32 limit = 2; }
+message ListResponse   {}
+
+message UpdateRequest  { string id = 1; }
+message UpdateResponse {}
+
+message DeleteRequest  { string id = 1; }
+message DeleteResponse {}

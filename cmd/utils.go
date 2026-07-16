@@ -1,27 +1,18 @@
+// utils.go re-exports the tui logger helpers so legacy call sites in this
+// package can keep using Info/Success/Warn/ErrorLog without any change.
+// All styling is now handled by internal/tui — this file contains no ANSI codes.
 package cmd
 
-import "fmt"
+import "github.com/mmycin/GoForge/internal/tui"
 
-const (
-	ColorReset  = "\033[0m"
-	ColorRed    = "\033[31m"
-	ColorGreen  = "\033[32m"
-	ColorYellow = "\033[33m"
-	ColorCyan   = "\033[36m"
-)
+// Info prints a styled informational line to stdout.
+func Info(format string, a ...any) { tui.Info(format, a...) }
 
-func Info(format string, a ...any) {
-	fmt.Printf(ColorCyan+"→ "+format+ColorReset+"\n", a...)
-}
+// Success prints a styled success line to stdout.
+func Success(format string, a ...any) { tui.Success(format, a...) }
 
-func Success(format string, a ...any) {
-	fmt.Printf(ColorGreen+"✓ "+format+ColorReset+"\n", a...)
-}
+// Warning prints a styled warning line to stderr.
+func Warning(format string, a ...any) { tui.Warn(format, a...) }
 
-func Warning(format string, a ...any) {
-	fmt.Printf(ColorYellow+"! "+format+ColorReset+"\n", a...)
-}
-
-func ErrorLog(format string, a ...any) {
-	fmt.Printf(ColorRed+"✗ "+format+ColorReset+"\n", a...)
-}
+// ErrorLog prints a styled error line to stderr.
+func ErrorLog(format string, a ...any) { tui.Error(format, a...) }

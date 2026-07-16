@@ -1,0 +1,49 @@
+package {{.PackageName}}
+
+import (
+	"context"
+	"fmt"
+
+	"{{.ModulePath}}/core/database"
+	coreevents "{{.ModulePath}}/core/events"
+)
+
+// AuditOn{{.TypeName}}Created handles the {{.TypeName}}Created event.
+type AuditOn{{.TypeName}}Created struct {
+	DB *database.Database
+}
+
+func (l *AuditOn{{.TypeName}}Created) Handle(ctx context.Context, e {{.TypeName}}Created) error {
+	fmt.Printf("{{.PackageName}} created: %d\n", e.ID)
+	// TODO: implement handler logic
+	return nil
+}
+
+// AuditOn{{.TypeName}}Updated handles the {{.TypeName}}Updated event.
+type AuditOn{{.TypeName}}Updated struct {
+	DB *database.Database
+}
+
+func (l *AuditOn{{.TypeName}}Updated) Handle(ctx context.Context, e {{.TypeName}}Updated) error {
+	fmt.Printf("{{.PackageName}} updated: %d\n", e.ID)
+	// TODO: implement handler logic
+	return nil
+}
+
+// AuditOn{{.TypeName}}Deleted handles the {{.TypeName}}Deleted event.
+type AuditOn{{.TypeName}}Deleted struct {
+	DB *database.Database
+}
+
+func (l *AuditOn{{.TypeName}}Deleted) Handle(ctx context.Context, e {{.TypeName}}Deleted) error {
+	fmt.Printf("{{.PackageName}} deleted: %d\n", e.ID)
+	// TODO: implement handler logic
+	return nil
+}
+
+// Compile-time assertions: ensure all listeners satisfy the Listener[T] interface.
+var (
+	_ coreevents.Listener[{{.TypeName}}Created] = (*AuditOn{{.TypeName}}Created)(nil)
+	_ coreevents.Listener[{{.TypeName}}Updated] = (*AuditOn{{.TypeName}}Updated)(nil)
+	_ coreevents.Listener[{{.TypeName}}Deleted] = (*AuditOn{{.TypeName}}Deleted)(nil)
+)

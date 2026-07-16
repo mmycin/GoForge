@@ -1,0 +1,20 @@
+package config
+
+import "github.com/spf13/viper"
+
+// {{.TypeName}}Config holds {{.PackageName}} configuration.
+// Add your own fields here and map them to .env keys below.
+type {{.TypeName}}Config struct {
+	// Example fields — replace with your own:
+	Enabled bool
+	Host    string
+	Port    int
+}
+
+func load{{.TypeName}}Config() ({{.TypeName}}Config, error) {
+	return {{.TypeName}}Config{
+		Enabled: viper.GetBool("{{.EnvPrefix}}_ENABLED"),
+		Host:    viper.GetString("{{.EnvPrefix}}_HOST"),
+		Port:    viper.GetInt("{{.EnvPrefix}}_PORT"),
+	}, nil
+}

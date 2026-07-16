@@ -7,51 +7,74 @@ import (
 	"os"
 	"strings"
 
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/mmycin/GoForge/internal/tui"
+	"github.com/mmycin/GoForge/internal/tui/confirm"
 	"github.com/spf13/cobra"
 )
 
-func init() {
-	rootCmd.AddCommand(genKeyCmd)
-	rootCmd.AddCommand(remKeyCmd)
+func newGenKeyCmd(d *Deps) *cobra.Command {
+	return &cobra.Command{
+		Use:   "gen:key",
+		Short: "Generate & save a secure APP_KEY",
+		Long:  `Generate a cryptographically secure 32-byte key and write it to .env as APP_KEY.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runGenKey(d)
+		},
+	}
 }
 
-var genKeyCmd = &cobra.Command{
-	Use:   "gen:key",
-	Short: "Generate a new APP_KEY",
-	Long:  `Generate a cryptographically secure 32-byte key and save it to the .env file.`,
-	Run: func(cmd *cobra.Command, args []string) {
-		key := make([]byte, 32)
-		if _, err := rand.Read(key); err != nil {
-			fmt.Printf("Error generating key: %v\n", err)
-			os.Exit(1)
-		}
+func runGenKey(_ *Deps) error {
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		return fmt.Errorf("could not generate random key: %w", err)
+	}
+	encoded := base64.StdEncoding.EncodeToString(key)
 
-		encodedKey := base64.StdEncoding.EncodeToString(key)
-		fmt.Printf("→ Generated Key: %s\n", encodedKey)
+	if err := updateEnvKey("APP_KEY", encoded); err != nil {
+		tui.Error("Failed to write .env: %v", err)
+		return err
+	}
 
-		if err := updateEnvKey("APP_KEY", encodedKey); err != nil {
-			fmt.Printf("Error updating .env file: %v\n", err)
-			os.Exit(1)
-		}
-
-		fmt.Println("✓ APP_KEY successfully updated in .env")
-	},
+	tui.Success("APP_KEY generated and saved to .env")
+	tui.Info("Key: %s", tui.CodeStyle.Render(encoded))
+	return nil
 }
 
-var remKeyCmd = &cobra.Command{
-	Use:   "rem:key",
-	Short: "Remove the APP_KEY from .env",
-	Long:  `Clear the APP_KEY value in your .env file.`,
-	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("Removing APP_KEY from .env...")
-		if err := updateEnvKey("APP_KEY", ""); err != nil {
-			fmt.Printf("Error clearing APP_KEY: %v\n", err)
-			os.Exit(1)
-		}
-		fmt.Println("✓ APP_KEY cleared from .env")
-	},
+func newRemKeyCmd(d *Deps) *cobra.Command {
+	return &cobra.Command{
+		Use:   "rem:key",
+		Short: "Clear the APP_KEY from .env",
+		Long:  `Remove the APP_KEY value from your project's .env file.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRemKey(d)
+		},
+	}
 }
 
+func runRemKey(_ *Deps) error {
+	body := "This will clear APP_KEY in your .env file.\n\nYou can regenerate it at any time with goforge gen:key."
+	cm := confirm.New("Clear APP_KEY", body, true)
+	cp := tea.NewProgram(cm, tea.WithAltScreen())
+	finalModel, err := cp.Run()
+	if err != nil {
+		return err
+	}
+	fm, ok := finalModel.(confirm.Model)
+	if !ok || !fm.Confirmed() {
+		tui.Info("Cancelled.")
+		return nil
+	}
+
+	if err := updateEnvKey("APP_KEY", ""); err != nil {
+		tui.Error("Failed to update .env: %v", err)
+		return err
+	}
+	tui.Success("APP_KEY cleared from .env.")
+	return nil
+}
+
+// updateEnvKey sets key=value in .env, creating the file if it doesn't exist.
 func updateEnvKey(key, value string) error {
 	content, err := os.ReadFile(".env")
 	if err != nil {
@@ -65,15 +88,13 @@ func updateEnvKey(key, value string) error {
 	found := false
 	for i, line := range lines {
 		if strings.HasPrefix(line, key+"=") {
-			lines[i] = fmt.Sprintf("%s=%s", key, value)
+			lines[i] = key + "=" + value
 			found = true
 			break
 		}
 	}
-
 	if !found {
-		lines = append(lines, fmt.Sprintf("%s=%s", key, value))
+		lines = append(lines, key+"="+value)
 	}
-
 	return os.WriteFile(".env", []byte(strings.Join(lines, "\n")), 0644)
 }
