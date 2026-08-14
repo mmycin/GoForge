@@ -25,6 +25,7 @@ type Deps struct {
 	GenConfig    *usecase.GenConfigUseCase
 	GenProto     *usecase.GenProtoUseCase
 	RemProto     *usecase.RemProtoUseCase
+	RemGRPC      *usecase.RemGRPCUseCase
 	Migrate      *usecase.MigrateUseCase
 	GenMigration *usecase.GenMigrationUseCase
 	RemMigration *usecase.RemMigrationUseCase
@@ -55,6 +56,7 @@ func NewDeps() *Deps {
 		GenConfig:    usecase.NewGenConfigUseCase(gen, fs),
 		GenProto:     usecase.NewGenProtoUseCase(gen, fs, exec),
 		RemProto:     usecase.NewRemProtoUseCase(fs),
+		RemGRPC:      usecase.NewRemGRPCUseCase(fs, exec),
 		Migrate:      usecase.NewMigrateUseCase(fs, exec),
 		GenMigration: usecase.NewGenMigrationUseCase(fs, exec),
 		RemMigration: usecase.NewRemMigrationUseCase(fs, exec),

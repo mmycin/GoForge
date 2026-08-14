@@ -56,6 +56,7 @@ func registerCommands(d *Deps) {
 		newGenConfigCmd(d),
 		newGenProtoCmd(d),
 		newRemProtoCmd(d),
+		newRemGRPCCmd(d),
 		newMigrateCmd(d),
 		newGenMigrationCmd(d),
 		newRemMigrationCmd(d),
