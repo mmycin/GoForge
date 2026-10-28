@@ -77,6 +77,7 @@ import (
 
 	"%s/core/config"
 	"%s/core/database"
+	_ "%s/core/database/drivers"
 	_ "%s/internal/database/seeders"
 )
 
@@ -112,7 +113,7 @@ func main() {
 	}
 	fmt.Printf("✓ %%s completed successfully\n", seederName)
 }
-`, modulePath, modulePath, modulePath, seederName)
+`, modulePath, modulePath, modulePath, modulePath, seederName)
 
 	tmp := "goforge_tmp_seed.go"
 	if err := uc.fs.WriteFile(tmp, []byte(src), 0644); err != nil {
