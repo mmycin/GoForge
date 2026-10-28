@@ -75,15 +75,12 @@ import (
 	"log"
 	"os"
 
-	"github.com/joho/godotenv"
 	"%s/core/config"
 	"%s/core/database"
 	_ "%s/internal/database/seeders"
 )
 
 func main() {
-	_ = godotenv.Load()
-
 	cfg, err := config.Load()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "config error:", err)
