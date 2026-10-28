@@ -31,6 +31,9 @@ type Deps struct {
 	RemMigration *usecase.RemMigrationUseCase
 	GenSqlc      *usecase.GenSqlcUseCase
 	RemSqlc      *usecase.RemSqlcUseCase
+	DbSeed       *usecase.DbSeedUseCase
+	GenSeeder    *usecase.GenSeederUseCase
+	RemSeeder    *usecase.RemSeederUseCase
 }
 
 // NewDeps constructs the full dependency graph with real OS implementations.
@@ -62,5 +65,8 @@ func NewDeps() *Deps {
 		RemMigration: usecase.NewRemMigrationUseCase(fs, exec),
 		GenSqlc:      usecase.NewGenSqlcUseCase(fs, exec),
 		RemSqlc:      usecase.NewRemSqlcUseCase(fs),
+		DbSeed:       usecase.NewDbSeedUseCase(fs, exec),
+		GenSeeder:    usecase.NewGenSeederUseCase(gen),
+		RemSeeder:    usecase.NewRemSeederUseCase(fs),
 	}
 }

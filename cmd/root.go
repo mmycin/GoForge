@@ -63,6 +63,9 @@ func registerCommands(d *Deps) {
 		newGenSqlcCmd(d),
 		newRemSqlcCmd(d),
 		newLoaderCmd(d),
+		newDbSeedCmd(d),
+		newGenSeederCmd(d),
+		newRemSeederCmd(d),
 	)
 }
 

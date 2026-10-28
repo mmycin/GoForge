@@ -1,0 +1,26 @@
+package seeders
+
+import (
+	"github.com/mmycin/goforge/core/database"
+	"gorm.io/gorm"
+)
+
+// {{.TypeName}} seeds initial data for {{.PackageName}}.
+// It is idempotent: use FirstOrCreate or similar patterns so re-running is safe.
+type {{.TypeName}} struct{}
+
+func (s *{{.TypeName}}) Name() string { return "{{.TypeName}}" }
+
+func (s *{{.TypeName}}) Run(db *gorm.DB) error {
+	// TODO: add your seeding logic here.
+	// Example:
+	//   record := MyModel{Field: "value"}
+	//   return db.Where(MyModel{Field: record.Field}).FirstOrCreate(&record).Error
+	_ = db
+	return nil
+}
+
+// Ensure {{.TypeName}} is registered at package init time.
+func init() {
+	database.RegisterSeeder(&{{.TypeName}}{})
+}

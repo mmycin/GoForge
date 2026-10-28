@@ -58,3 +58,9 @@ type KernelService struct {
 	Name   string   // snake_case package name
 	Models []string // exported struct names found in model.go
 }
+
+// SeederData is passed to templates/seeder/seeder.go.tmpl.
+type SeederData struct {
+	PackageName string // snake_case, e.g. "user"
+	TypeName    string // CamelCase + "Seeder", e.g. "UserSeeder"
+}

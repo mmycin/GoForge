@@ -32,6 +32,7 @@ var sections = []section{
 			{Name: "gen:command", Desc: "Create a custom console command", HasWizard: true},
 			{Name: "gen:config", Desc: "Add a new config section", HasWizard: true},
 			{Name: "gen:proto", Desc: "Compile proto files & generate gRPC stubs", HasWizard: true},
+			{Name: "gen:seeder", Desc: "Generate a new database seeder", HasWizard: true},
 		},
 	},
 	{
@@ -43,6 +44,7 @@ var sections = []section{
 			{Name: "gen:sqlc", Desc: "Generate type-safe SQL query code"},
 			{Name: "rem:sqlc", Desc: "Remove generated SQLC integration"},
 			{Name: "loader", Desc: "Inspect GORM schema output"},
+			{Name: "db:seed", Desc: "Seed the database with initial data"},
 		},
 	},
 	{

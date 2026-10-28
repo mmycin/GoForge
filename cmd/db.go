@@ -299,6 +299,62 @@ func main() {
 	return err
 }
 
+// ── db:seed ───────────────────────────────────────────────────────────────────
+
+func newDbSeedCmd(d *Deps) *cobra.Command {
+	var className string
+
+	cmd := &cobra.Command{
+		Use:   "db:seed",
+		Short: "Seed the database with initial data",
+		Long:  `Execute database seeders. Runs DatabaseSeeder by default, or a specific seeder with --class.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runDbSeed(d, className)
+		},
+	}
+
+	cmd.Flags().StringVarP(&className, "class", "c", "", "Run a specific seeder by name (e.g. --class=UserSeeder)")
+	return cmd
+}
+
+func runDbSeed(d *Deps, className string) error {
+	info := d.DbSeed.Detect()
+
+	seederLabel := "DatabaseSeeder (all seeders)"
+	if className != "" {
+		seederLabel = className
+	}
+
+	body := fmt.Sprintf(
+		"Seeder      %s\nConnection  %s\nDatabase    %s",
+		seederLabel, info.Connection,
+		formatDBLabel(info.DBName, info.DBHost, info.DBPort),
+	)
+
+	cm := confirm.New("Seed Database", body, false)
+	cp := tea.NewProgram(cm, tea.WithAltScreen())
+	finalModel, err := cp.Run()
+	if err != nil {
+		return err
+	}
+	fm, ok := finalModel.(confirm.Model)
+	if !ok || !fm.Confirmed() {
+		tui.Info("Cancelled.")
+		return nil
+	}
+
+	title := "Database Seed Output"
+	if className != "" {
+		title = fmt.Sprintf("Seeding: %s", className)
+	}
+
+	return runWithViewport(d, title, func(ch chan<- any) error {
+		return d.DbSeed.Run(className, ch)
+	})
+}
+
+
+
 // ── shared viewport runner ────────────────────────────────────────────────────
 
 // runWithViewport runs a use-case that streams events and displays them in a
