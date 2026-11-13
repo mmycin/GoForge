@@ -73,7 +73,7 @@ func runGenService(d *Deps, name string) error {
 	steps := []string{
 		"Writing service.go", "Writing handler.go", "Writing model.go",
 		"Writing routes.go", "Writing docs.go", "Writing grpc.go",
-		"Writing proto file", "Updating kernel.go",
+		"Writing module.go", "Writing proto file", "Updating kernel.go",
 	}
 	pm := progress.New(fmt.Sprintf("Scaffolding service '%s'", name), steps)
 	progressCh := make(chan any, 64)

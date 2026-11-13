@@ -72,6 +72,7 @@ func runGenEvent(d *Deps, serviceName string) error {
 	steps := []string{
 		"Writing events.go",
 		"Writing listeners.go",
+		"Updating module.go",
 	}
 	pm2 := progress.New(fmt.Sprintf("Generating events for '%s'", serviceName), steps)
 	progressCh := make(chan any, 32)
@@ -98,7 +99,7 @@ func runGenEvent(d *Deps, serviceName string) error {
 	rm := result.New(
 		fmt.Sprintf("Event files generated for '%s'", serviceName),
 		finalFiles,
-		"Register your listeners in the service boot file.",
+		"RegisterListeners was wired into module.go automatically.",
 	)
 	rp := tea.NewProgram(rm, tea.WithAltScreen())
 	_, err := rp.Run()

@@ -75,7 +75,7 @@ func EnvPrefix(name string) string {
 }
 
 // ListServices reads internal/services/ via the file system and returns the
-// names of directories that contain a model.go file.
+// names of directories that contain a module.go or model.go file.
 func (g *Generator) ListServices() ([]string, error) {
 	entries, err := g.fs.ReadDir("internal/services")
 	if err != nil {
@@ -87,8 +87,9 @@ func (g *Generator) ListServices() ([]string, error) {
 	var names []string
 	for _, e := range entries {
 		if e.IsDir() {
-			_, statErr := g.fs.Stat("internal/services/" + e.Name() + "/model.go")
-			if statErr == nil {
+			_, modErr := g.fs.Stat("internal/services/" + e.Name() + "/module.go")
+			_, modelErr := g.fs.Stat("internal/services/" + e.Name() + "/model.go")
+			if modErr == nil || modelErr == nil {
 				names = append(names, e.Name())
 			}
 		}

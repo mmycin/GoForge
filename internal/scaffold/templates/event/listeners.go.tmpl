@@ -47,3 +47,11 @@ var (
 	_ coreevents.Listener[{{.TypeName}}Updated] = (*AuditOn{{.TypeName}}Updated)(nil)
 	_ coreevents.Listener[{{.TypeName}}Deleted] = (*AuditOn{{.TypeName}}Deleted)(nil)
 )
+
+// RegisterListeners registers all {{.PackageName}} domain event listeners on the event bus.
+func RegisterListeners(bus *coreevents.EventBus, db *database.Database) error {
+	coreevents.On(bus, Event{{.TypeName}}Created, &AuditOn{{.TypeName}}Created{DB: db})
+	coreevents.On(bus, Event{{.TypeName}}Updated, &AuditOn{{.TypeName}}Updated{DB: db})
+	coreevents.On(bus, Event{{.TypeName}}Deleted, &AuditOn{{.TypeName}}Deleted{DB: db})
+	return nil
+}

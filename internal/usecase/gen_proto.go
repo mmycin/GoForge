@@ -94,6 +94,15 @@ func (uc *GenProtoUseCase) Run(serviceName, modulePath string, progress Progress
 		} else {
 			send(progress, StepDone{Label: fmt.Sprintf("Scaffolded grpc.go for %s", svcName)})
 		}
+
+		// Register New<TypeName>GRPC provider in module.go
+		moduleFile := filepath.Join("internal/services", svcName, "module.go")
+		if uc.gen.Exists(moduleFile) {
+			ctorName := "New" + scaffold.ToCamelCase(svcName) + "GRPC"
+			if _, err := addEntryToModuleSlice(uc.fs, moduleFile, "Providers", ctorName); err != nil {
+				send(progress, LogLine{Level: "warn", Text: fmt.Sprintf("module.go update: %v", err)})
+			}
+		}
 	}
 
 	send(progress, UseCaseDone{})

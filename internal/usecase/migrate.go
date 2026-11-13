@@ -106,20 +106,34 @@ func (uc *MigrateUseCase) runGorm(cfg *env.Config, progress Progress) error {
 import (
 	"fmt"
 	"os"
+	"%s/core/config"
 	"%s/core/database"
+	_ "%s/core/database/drivers"
 	"%s/internal/services"
 )
 func main() {
-	if err := database.Connect(); err != nil {
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "config load failed:", err)
+		os.Exit(1)
+	}
+	db, err := database.Connect(cfg.DB)
+	if err != nil {
 		fmt.Fprintln(os.Stderr, "connection failed:", err)
 		os.Exit(1)
 	}
-	if err := database.DB.Gorm.AutoMigrate(services.Model()...); err != nil {
+	defer db.Close()
+	gormDB, err := db.GetGorm()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "gorm unavailable:", err)
+		os.Exit(1)
+	}
+	if err := gormDB.AutoMigrate(services.Model()...); err != nil {
 		fmt.Fprintln(os.Stderr, "migrate failed:", err)
 		os.Exit(1)
 	}
 	fmt.Println("Migration completed")
-}`, modulePath, modulePath)
+}`, modulePath, modulePath, modulePath, modulePath)
 
 	tmp := "goforge_tmp_migrate.go"
 	if err := uc.fs.WriteFile(tmp, []byte(src), 0644); err != nil {

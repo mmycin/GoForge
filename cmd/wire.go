@@ -53,7 +53,7 @@ func NewDeps() *Deps {
 		NewProject:   usecase.NewNewProjectUseCase(fs, exec, git),
 		GenService:   usecase.NewGenServiceUseCase(gen, fs),
 		RemService:   usecase.NewRemServiceUseCase(gen, fs),
-		GenEvent:     usecase.NewGenEventUseCase(gen),
+		GenEvent:     usecase.NewGenEventUseCase(gen, fs),
 		GenCommand:   usecase.NewGenCommandUseCase(gen),
 		RemCommand:   usecase.NewRemCommandUseCase(fs),
 		GenConfig:    usecase.NewGenConfigUseCase(gen, fs),

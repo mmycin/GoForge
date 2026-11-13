@@ -1,0 +1,21 @@
+package {{.PackageName}}
+
+import "{{.ModulePath}}/core/di"
+
+// Module declares the {{.PackageName}} service's providers, startup invokes, and GORM models.
+func Module() di.Module {
+	return di.Module{
+		Name: "{{.PackageName}}",
+		Providers: []any{
+			New{{.TypeName}}Service,
+			New{{.TypeName}}Handler,
+			New{{.TypeName}}Routes,
+			New{{.TypeName}}Docs,
+		},
+		Invokes: []any{},
+		Models: []any{
+			&{{.TypeName}}{},
+		},
+	}
+}
+

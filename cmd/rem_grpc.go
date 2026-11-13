@@ -1,8 +1,6 @@
 package cmd
 
 import (
-	"fmt"
-
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/mmycin/GoForge/internal/tui"
 	"github.com/mmycin/GoForge/internal/tui/confirm"
@@ -89,6 +87,6 @@ func runRemGRPC(d *Deps) error {
 		return err
 	}
 
-	tui.Success(fmt.Sprintf("gRPC removed. Your project is now REST-only."))
+	tui.Success("gRPC removed. Your project is now REST-only.")
 	return nil
 }

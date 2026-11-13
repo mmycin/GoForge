@@ -12,12 +12,17 @@ import (
 // {{.TypeName}}GRPC implements the gRPC server for {{.PackageName}}.
 type {{.TypeName}}GRPC struct {
 	pb.Unimplemented{{.TypeName}}ServiceServer
+	service *{{.TypeName}}Service
 }
 
-func init() {
-	server.RegisterGRPC(func(s *grpc.Server) {
-		pb.Register{{.TypeName}}ServiceServer(s, &{{.TypeName}}GRPC{})
-	})
+// New{{.TypeName}}GRPC creates a new {{.TypeName}}GRPC instance with its dependencies injected.
+func New{{.TypeName}}GRPC(service *{{.TypeName}}Service) *{{.TypeName}}GRPC {
+	return &{{.TypeName}}GRPC{service: service}
+}
+
+// Register attaches the {{.PackageName}} gRPC service to the gRPC server.
+func (t *{{.TypeName}}GRPC) Register(s *grpc.Server) {
+	pb.Register{{.TypeName}}ServiceServer(s, t)
 }
 {{range .Methods}}
 func (t *{{$.TypeName}}GRPC) {{.}} {
@@ -25,5 +30,8 @@ func (t *{{$.TypeName}}GRPC) {{.}} {
 	return nil, nil
 }
 {{end}}
-// Ensure context is used — remove when implementing methods.
-var _ context.Context
+// Compile-time assertions.
+var (
+	_ server.GRPCRegistry = (*{{.TypeName}}GRPC)(nil)
+	_ context.Context
+)

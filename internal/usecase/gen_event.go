@@ -4,20 +4,23 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"github.com/mmycin/GoForge/internal/infra"
 	"github.com/mmycin/GoForge/internal/scaffold"
 )
 
-// GenEventUseCase generates events.go and listeners.go for a service.
+// GenEventUseCase generates events.go and listeners.go for a service and
+// registers RegisterListeners in the service's module.go Invokes slice.
 type GenEventUseCase struct {
 	gen *scaffold.Generator
+	fs  infra.FileSystem
 }
 
 // NewGenEventUseCase constructs a GenEventUseCase.
-func NewGenEventUseCase(gen *scaffold.Generator) *GenEventUseCase {
-	return &GenEventUseCase{gen: gen}
+func NewGenEventUseCase(gen *scaffold.Generator, fs infra.FileSystem) *GenEventUseCase {
+	return &GenEventUseCase{gen: gen, fs: fs}
 }
 
-// Run generates both event files into the given service's directory.
+// Run generates both event files into the given service's directory and wires module.go.
 func (uc *GenEventUseCase) Run(serviceName, modulePath string, progress Progress) error {
 	serviceDir := filepath.Join("internal/services", serviceName)
 
@@ -52,6 +55,20 @@ func (uc *GenEventUseCase) Run(serviceName, modulePath string, progress Progress
 		}
 		generated = append(generated, GeneratedFile{Path: f.dest})
 		send(progress, StepDone{Label: "Writing " + filepath.Base(f.dest)})
+	}
+
+	moduleFile := filepath.Join(serviceDir, "module.go")
+	if uc.gen.Exists(moduleFile) {
+		send(progress, StepStarted{Label: "Updating module.go"})
+		updated, err := addEntryToModuleSlice(uc.fs, moduleFile, "Invokes", "RegisterListeners")
+		if err != nil {
+			send(progress, LogLine{Level: "warn", Text: fmt.Sprintf("module.go update: %v", err)})
+		} else {
+			if updated {
+				generated = append(generated, GeneratedFile{Path: moduleFile, Updated: true})
+			}
+			send(progress, StepDone{Label: "Updating module.go"})
+		}
 	}
 
 	send(progress, UseCaseDone{Files: generated})

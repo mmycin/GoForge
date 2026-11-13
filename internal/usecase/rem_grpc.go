@@ -171,9 +171,22 @@ func (uc *RemGRPCUseCase) patchConfigGo() error {
 	return uc.fs.WriteFile(path, []byte(src), 0644)
 }
 
-// patchServicesKernel removes GRPCRegistry from the return signature and
-// the grpcRegistries variable from internal/services/kernel.go.
+// patchServicesKernel removes gRPC provider entries from each service's module.go
+// and any legacy GRPCRegistry references from internal/services/kernel.go.
 func (uc *RemGRPCUseCase) patchServicesKernel() error {
+	// Strip New*GRPC from every service's module.go if present.
+	if entries, err := uc.fs.ReadDir("internal/services"); err == nil {
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			modulePath := filepath.Join("internal/services", e.Name(), "module.go")
+			if _, statErr := uc.fs.Stat(modulePath); statErr == nil {
+				_, _ = removeEntryFromModuleFile(uc.fs, modulePath, "GRPC,")
+			}
+		}
+	}
+
 	const path = "internal/services/kernel.go"
 	raw, err := uc.fs.ReadFile(path)
 	if err != nil {
@@ -181,21 +194,11 @@ func (uc *RemGRPCUseCase) patchServicesKernel() error {
 	}
 	src := string(raw)
 
-	// Change function signature return type
+	// Legacy kernel.go cleanup (safe no-op on modular DI kernel.go)
 	src = strings.ReplaceAll(src, "([]server.Router, []server.GRPCRegistry)", "[]server.Router")
-
-	// Remove grpcRegistries variable declaration
 	src = removeLineContaining(src, "grpcRegistries := []server.GRPCRegistry{}")
-
-	// Remove grpcRegistries return value from return statements
-	// Pattern: "return routers, grpcRegistries" → "return routers"
 	src = strings.ReplaceAll(src, "return routers, grpcRegistries", "return routers")
-
-	// Remove any lingering grpc import if present
 	src = removeLineContaining(src, `"google.golang.org/grpc"`)
-
-	// Remove server.GRPCRegistry import hint from function comment if it exists
-	// (cosmetic — won't break anything if not found)
 
 	return uc.fs.WriteFile(path, []byte(src), 0644)
 }
@@ -238,9 +241,10 @@ func (uc *RemGRPCUseCase) patchServeGo() error {
 }
 
 // patchBootKernel rewrites boot/kernel.go to remove all gRPC references:
-//   - drops grpcRegistries param from NewApp
+//   - removes di.AutoCollect[server.GRPCRegistry]() and di.Collect[server.GRPCRegistry](container)
+//   - drops grpcRegistries param from NewApp and buildServers
 //   - removes the buildServers helper (which held the GRPC.Enable conditional)
-//   - replaces the buildServers call with a direct HTTP-only server slice
+//   - replaces buildServers calls with a direct HTTP-only server slice
 func (uc *RemGRPCUseCase) patchBootKernel() error {
 	const path = "boot/kernel.go"
 	raw, err := uc.fs.ReadFile(path)
@@ -249,28 +253,33 @@ func (uc *RemGRPCUseCase) patchBootKernel() error {
 	}
 	src := string(raw)
 
-	// 1. Remove grpcRegistries parameter from NewApp signature.
-	//    Handles both comma-leading and comma-trailing variants.
+	// 1. Remove modular DI gRPC auto-collection lines.
+	src = removeLineContaining(src, "di.AutoCollect[server.GRPCRegistry]()")
+	src = removeLineContaining(src, "di.Collect[server.GRPCRegistry](")
+
+	// 2. Remove grpcRegistries parameter from NewApp signature.
 	src = strings.ReplaceAll(src, ", grpcRegistries []server.GRPCRegistry", "")
 	src = strings.ReplaceAll(src, "grpcRegistries []server.GRPCRegistry, ", "")
 	src = strings.ReplaceAll(src, "grpcRegistries []server.GRPCRegistry", "")
 
-	// 2. Replace buildServers call with a direct HTTP-only slice.
-	//    Pattern: servers := buildServers(cfg, httpRouters, grpcRegistries)
+	// 3. Replace buildServers calls with a direct HTTP-only slice.
+	src = strings.ReplaceAll(src,
+		"servers := buildServers(cfg, routers, grpcRegistries)",
+		"servers := []server.Server{\n\t\tserver.NewHTTPServer(cfg, routers),\n\t}",
+	)
 	src = strings.ReplaceAll(src,
 		"servers := buildServers(cfg, httpRouters, grpcRegistries)",
 		"servers := []server.Server{\n\t\tserver.NewHTTPServer(cfg, httpRouters),\n\t}",
 	)
-	// Fallback: buildServers with only two args (if already partially patched)
 	src = strings.ReplaceAll(src,
 		"servers := buildServers(cfg, httpRouters)",
 		"servers := []server.Server{\n\t\tserver.NewHTTPServer(cfg, httpRouters),\n\t}",
 	)
 
-	// 3. Remove the entire buildServers function.
+	// 4. Remove the entire buildServers function.
 	src = removeFuncNamed(src, "buildServers")
 
-	// 4. Remove any leftover blank lines caused by the removals (3+ consecutive newlines → 2).
+	// 5. Remove any leftover blank lines caused by the removals (3+ consecutive newlines → 2).
 	for strings.Contains(src, "\n\n\n") {
 		src = strings.ReplaceAll(src, "\n\n\n", "\n\n")
 	}
